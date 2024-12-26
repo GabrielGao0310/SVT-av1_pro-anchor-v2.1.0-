@@ -235,6 +235,13 @@ typedef struct MbModeInfo {
     BlockModeInfoEnc    block_mi;
     PaletteLumaModeInfo palette_mode_info;
     int8_t              cdef_strength;
+
+    /*! \brief Whether to use cross-component sample offset for the Y plane. */
+    uint8_t ccso_blk_y : 2;
+    /*! \brief Whether to use cross-component sample offset for the U plane. */
+    uint8_t ccso_blk_u : 2;
+    /*! \brief Whether to use cross-component sample offset for the V plane. */
+    uint8_t ccso_blk_v : 2;
 } MbModeInfo;
 
 void svt_av1_tile_set_col(TileInfo *tile, const TilesInfo *tiles_info, int32_t mi_cols, int col);

@@ -26,6 +26,15 @@
 #include "EbPictureControlSet.h"
 #include "EbResize.h"
 
+#if CCSO
+#include "EbPickccso.h"
+#endif
+
+void svt_av1_setup_dst_planes(PictureControlSet *pcs, struct MacroblockdPlane *planes, BlockSize bsize,
+                              //const Yv12BufferConfig *src,
+                              const EbPictureBufferDesc *src, int32_t mi_row, int32_t mi_col, const int32_t plane_start,
+                              const int32_t plane_end);
+
 void svt_aom_copy_sb8_16(uint16_t *dst, int32_t dstride, const uint8_t *src, int32_t src_voffset, int32_t src_hoffset,
                          int32_t sstride, int32_t vsize, int32_t hsize, Bool is_16bit);
 
@@ -348,6 +357,8 @@ static void cdef_seg_search(PictureControlSet *pcs, SequenceControlSet *scs, uin
     }
 }
 
+
+
 /******************************************************
  * CDEF Kernel
  ******************************************************/
@@ -356,26 +367,28 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
     EbThreadContext    *thread_ctx  = (EbThreadContext *)input_ptr;
     CdefContext        *context_ptr = (CdefContext *)thread_ctx->priv;
     PictureControlSet  *pcs;
-    SequenceControlSet *scs;
 
     //// Input
     EbObjectWrapper *dlf_results_wrapper;
     DlfResults      *dlf_results;
 
     //// Output
-    EbObjectWrapper *cdef_results_wrapper;
-    CdefResults     *cdef_results;
+    EbObjectWrapper *cdef_results_wrapper = NULL;
+    CdefResults     *cdef_results = NULL;
 
     // SB Loop variables
 
     for (;;) {
-        FrameHeader *frm_hdr;
 
         // Get DLF Results
         EB_GET_FULL_OBJECT(context_ptr->cdef_input_fifo_ptr, &dlf_results_wrapper);
 
         dlf_results                   = (DlfResults *)dlf_results_wrapper->object_ptr;
         pcs                           = (PictureControlSet *)dlf_results->pcs_wrapper->object_ptr;
+
+        FrameHeader *frm_hdr;
+        SequenceControlSet *scs;
+
         PictureParentControlSet *ppcs = pcs->ppcs;
         scs                           = pcs->scs;
 
@@ -383,6 +396,89 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         Av1Common *cm            = pcs->ppcs->av1_cm;
         frm_hdr                  = &pcs->ppcs->frm_hdr;
         CdefControls *cdef_ctrls = &pcs->ppcs->cdef_ctrls;
+        
+        // printf("\nccso\n");
+    #if CCSO
+        uint8_t* ref_yuv[3];
+        EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic;
+        const uint32_t       input_offset_y = ref->org_x + ref->org_y * ref->stride_y;
+        ref_yuv[0]           = ref->buffer_y + (input_offset_y << is_16bit);
+        const uint32_t input_offset_cb      = (ref->org_x + ref->org_y * ref->stride_cb) >> 1;
+        ref_yuv[1]           = ref->buffer_cb + (input_offset_cb << is_16bit);
+        const uint32_t input_offset_cr      = (ref->org_x + ref->org_y * ref->stride_cr) >> 1;
+        ref_yuv[2]           = ref->buffer_cr + (input_offset_cr << is_16bit);
+
+        uint16_t *rec_uv[CCSO_NUM_COMPONENTS];
+        uint16_t *org_uv[CCSO_NUM_COMPONENTS];
+        uint16_t *ext_rec_y = NULL;
+        const int num_planes = av1_num_planes(&scs->seq_header.color_config);
+        // printf("\nccso begin\n");
+        EbPictureBufferDesc *recon_pic;
+        svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
+        struct MacroblockdPlane pd[3];
+        pd[0].subsampling_x = 0;
+        pd[0].subsampling_y = 0;
+        pd[0].plane_type    = PLANE_TYPE_Y;
+        pd[0].is_16bit      = recon_pic->bit_depth > 8;
+        pd[1].subsampling_x = 1;
+        pd[1].subsampling_y = 1;
+        pd[1].plane_type    = PLANE_TYPE_UV;
+        pd[1].is_16bit      = recon_pic->bit_depth > 8;
+        pd[2].subsampling_x = 1;
+        pd[2].subsampling_y = 1;
+        pd[2].plane_type    = PLANE_TYPE_UV;
+        pd[2].is_16bit      = recon_pic->bit_depth > 8;
+        if (pcs->ppcs->scs->is_16bit_pipeline)
+            pd[0].is_16bit = pd[1].is_16bit = pd[2].is_16bit = TRUE;
+        // /* pointer to current frame */
+        // Yv12BufferConfig cur_buf;
+        // svt_aom_link_eb_to_aom_buffer_desc_8bit(pcs->ppcs->enhanced_pic, &cur_buf);
+        svt_av1_setup_dst_planes( pcs, pd, pcs->ppcs->scs->seq_header.sb_size, recon_pic, 0, 0, 0, num_planes);
+        const int ccso_stride = pd[0].dst.width;
+        const int ccso_stride_ext = pd[0].dst.width + (CCSO_PADDING_SIZE << 1);
+
+        for (int pli = 0; pli < num_planes; pli++) {
+            rec_uv[pli] = svt_aom_malloc(sizeof(*rec_uv[pli]) * pd[0].dst.height *
+                                    ccso_stride);
+            org_uv[pli] = svt_aom_malloc(sizeof(*org_uv[pli]) * pd[0].dst.height *
+                                    ccso_stride);
+        }
+
+        double mse1[3] = {0, 0, 0}; //rec和org
+        double mse2[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+        for (int p = 0; p < 3; p++){
+            for(int i = 0; i < pd[p].dst.height; i++){
+                for (int j = 0; j < pd[p].dst.width; j++) {
+                    mse1[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+                    int std = p==0 ? ref->stride_y : ref->stride_cb;
+                    // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+                    uint8_t* buf = ref_yuv[p];
+                    mse2[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+                }
+            }
+            mse1[p] = mse1[p] / (pd[p].dst.height * pd[p].dst.width);
+            mse2[p] = mse2[p] / (pd[p].dst.height * pd[p].dst.width);
+        }
+
+        ext_rec_y =
+            svt_aom_malloc(sizeof(*ext_rec_y) *
+                    (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) *
+                    (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
+        for (int pli = 0; pli < 1; pli++) {
+            const int pic_height = pd[pli].dst.height;
+            const int pic_width = pd[pli].dst.width;
+            const int dst_stride = pd[pli].dst.stride;
+            for (int r = 0; r < pic_height; ++r) {
+                for (int c = 0; c < pic_width; ++c) {
+                    if (pli == 0) {
+                        ext_rec_y[(r + CCSO_PADDING_SIZE) * ccso_stride_ext + c + CCSO_PADDING_SIZE] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+                    }
+                }
+            }
+        }
+        extend_ccso_border(ext_rec_y, CCSO_PADDING_SIZE, pd);
+    #endif
+
         if (!cdef_ctrls->use_reference_cdef_fs) {
             if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
                 cdef_seg_search(pcs, scs, dlf_results->segment_index);
@@ -410,6 +506,146 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 frm_hdr->cdef_params.cdef_uv_strength[0] = 0;
             }
 
+    #if CCSO
+            svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
+            svt_av1_setup_dst_planes( pcs, pd, pcs->ppcs->scs->seq_header.sb_size, recon_pic, 0, 0, 0, num_planes);
+
+            uint16_t ref_stride;
+            uint16_t *ref_buffer_16bit = NULL;
+            uint8_t *ref_buffer_8bit = NULL;
+
+            // Reading original and reconstructed chroma samples as input
+            for (int pli = 0; pli < num_planes; pli++) {
+                const int pic_height = pd[pli].dst.height;
+                const int pic_width = pd[pli].dst.width;
+                const int dst_stride = pd[pli].dst.stride;
+                
+                if (pcs->scs->is_16bit_pipeline) {
+                    switch (pli) {
+                        case 0:
+                            ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+                            ref_stride = ref->stride_y;
+                            break;
+                        case 1:
+                            ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+                            ref_stride = ref->stride_cb;
+                            break;
+                        case 2:
+                            ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+                            ref_stride = ref->stride_cr;
+                            break;
+                        default: ref_stride = 0;
+                    }
+                    for (int r = 0; r < pic_height; ++r) {
+                        for (int c = 0; c < pic_width; ++c) {
+                            rec_uv[pli][r * ccso_stride + c] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+                            org_uv[pli][r * ccso_stride + c] = ref_buffer_16bit[r * ref_stride + c];
+                        }
+                    }
+                } else {
+                    // 8bit
+                    switch (pli) {
+                        case 0:{
+                            // for (int i = 0; i < ref->luma_size; i++) {
+                            //     ref_buffer[i] = (uint16_t)ref->buffer_y[i];
+                            // }
+                            ref_buffer_8bit = ref_yuv[pli];
+                            ref_stride = ref->stride_y;
+                            break;
+                        }
+
+                        case 1:{
+                            // for (int i = 0; i < ref->chroma_size; i++) {
+                            //     ref_buffer[i] = (uint16_t)ref->buffer_cb[i];
+                            // }
+                            ref_buffer_8bit = ref_yuv[pli];
+                            ref_stride = ref->stride_cb;
+                            break;
+                        }
+
+                        case 2:{
+                            // for (int i = 0; i < ref->chroma_size; i++) {
+                            //     ref_buffer[i] = (uint16_t)ref->buffer_cr[i];
+                            // }
+                            ref_buffer_8bit = ref_yuv[pli];
+                            ref_stride = ref->stride_cr;
+                            break;
+                        }
+
+                        default: ref_stride = 0;
+                    }
+                    for (int r = 0; r < pic_height; ++r) {
+                        for (int c = 0; c < pic_width; ++c) {
+                            rec_uv[pli][r * ccso_stride + c] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+                            org_uv[pli][r * ccso_stride + c] = (uint16_t)ref_buffer_8bit[r * ref_stride + c];
+                        }
+                    }
+                }
+            }
+
+            uint64_t   lambda;
+            uint32_t   fast_lambda, full_lambda = 0;
+            (*svt_aom_av1_lambda_assignment_function_table[pcs->ppcs->pred_structure])(
+                pcs,
+                &fast_lambda,
+                &full_lambda,
+                (uint8_t)pcs->ppcs->enhanced_pic->bit_depth,
+                pcs->ppcs->frm_hdr.quantization_params.base_q_idx,
+                FALSE);
+            lambda   = full_lambda;
+            // uint8_t   bit_depth   = pcs->hbd_md ? 10 : 8;
+
+            // int32_t rdmult    = svt_aom_compute_rd_mult(pcs, ppcs->frm_hdr.quantization_params.base_q_idx, 
+            // ppcs->frm_hdr.quantization_params.base_q_idx, bit_depth);
+
+            // 算一下rec和org的sse，好像不大对劲
+            double mse3[3] = {0, 0, 0}; //rec和org
+            double mse4[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+            for (int p = 0; p < 3; p++){
+                for(int i = 0; i < pd[p].dst.height; i++){
+                    for (int j = 0; j < pd[p].dst.width; j++) {
+                        mse3[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+                        int std = p==0 ? ref->stride_y : ref->stride_cb;
+                        // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+                        uint8_t* buf = ref_yuv[p];
+                        mse4[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+                    }
+                }
+                mse3[p] = mse3[p] / (pd[p].dst.height * pd[p].dst.width);
+                mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
+            }
+
+
+
+            ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
+            ccso_frame(recon_pic, pcs, pd, ext_rec_y);
+
+
+            // 算一下rec和org的sse，好像不大对劲
+            double mse5[3] = {0, 0, 0}; //rec和org
+            double mse6[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+            for (int p = 0; p < 3; p++){
+                for(int i = 0; i < pd[p].dst.height; i++){
+                    for (int j = 0; j < pd[p].dst.width; j++) {
+                        mse5[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+                        int std = p==0 ? ref->stride_y : ref->stride_cb;
+                        // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+                        uint8_t* buf = ref_yuv[p];
+                        mse6[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+                    }
+                }
+                mse5[p] = mse5[p] / (pd[p].dst.height * pd[p].dst.width);
+                mse6[p] = mse6[p] / (pd[p].dst.height * pd[p].dst.width);
+
+            }
+            svt_aom_free(ext_rec_y);
+            
+            for (int pli = 0; pli < num_planes; pli++) {
+                svt_aom_free(rec_uv[pli]);
+                svt_aom_free(org_uv[pli]);
+            }      
+    #endif
+
             //restoration prep
             Bool is_lr = ppcs->enable_restoration && frm_hdr->allow_intrabc == 0;
             if (is_lr) {
@@ -430,7 +666,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 recon->height = pcs->ppcs->render_height;
                 if (is_lr) {
                     EbPictureBufferDesc *input_pic = is_16bit ? pcs->input_frame16bit
-                                                              : pcs->ppcs->enhanced_unscaled_pic;
+                                                                : pcs->ppcs->enhanced_unscaled_pic;
 
                     svt_aom_assert_err(pcs->scaled_input_pic == NULL, "pcs_ptr->scaled_input_pic is not desctoried!");
                     EbPictureBufferDesc *scaled_input_pic = NULL;
@@ -440,14 +676,14 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                         superres_params_type spr_params = {recon->width, recon->height, 0};
                         svt_aom_downscaled_source_buffer_desc_ctor(&scaled_input_pic, input_pic, spr_params);
                         svt_aom_resize_frame(input_pic,
-                                             scaled_input_pic,
-                                             scs->static_config.encoder_bit_depth,
-                                             av1_num_planes(&scs->seq_header.color_config),
-                                             scs->subsampling_x,
-                                             scs->subsampling_y,
-                                             input_pic->packed_flag,
-                                             PICTURE_BUFFER_DESC_FULL_MASK,
-                                             0); // is_2bcompress
+                                                scaled_input_pic,
+                                                scs->static_config.encoder_bit_depth,
+                                                av1_num_planes(&scs->seq_header.color_config),
+                                                scs->subsampling_x,
+                                                scs->subsampling_y,
+                                                input_pic->packed_flag,
+                                                PICTURE_BUFFER_DESC_FULL_MASK,
+                                                0); // is_2bcompress
                         pcs->scaled_input_pic = scaled_input_pic;
                     }
                 }
@@ -474,6 +710,10 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 svt_post_full_object(cdef_results_wrapper);
             }
         }
+
+        // cdef_and_ccso(pcs, dlf_results, context_ptr, cdef_results_wrapper, cdef_results);
+
+
         svt_release_mutex(pcs->cdef_search_mutex);
 
         // Release Dlf Results

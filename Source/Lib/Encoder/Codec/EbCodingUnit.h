@@ -129,6 +129,12 @@ typedef struct MacroBlockD {
     TXFM_CONTEXT  *above_txfm_context;
     TXFM_CONTEXT  *left_txfm_context;
     BlockSize      bsize;
+    /** ccso blk y */
+    uint8_t ccso_blk_y;
+    /** ccso blk u */
+    uint8_t ccso_blk_u;
+    /** ccso blk v */
+    uint8_t ccso_blk_v;
 } MacroBlockD;
 
 typedef struct Macroblock {

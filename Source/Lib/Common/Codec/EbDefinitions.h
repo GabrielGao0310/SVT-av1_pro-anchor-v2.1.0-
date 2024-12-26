@@ -1405,6 +1405,19 @@ typedef enum ATTRIBUTE_PACKED {
 // onyxc_int.h
 #define CDEF_MAX_STRENGTHS 16
 
+// Cross-Component Sample Offset (CCSO)
+#define CCSO_BLK_SIZE 7
+#define CCSO_PADDING_SIZE 5
+#define CCSO_BAND_NUM 128
+#define CCSO_NUM_COMPONENTS 3
+#define CONFIG_D143_CCSO_FM_FLAG 1
+#define CONFIG_CCSO_SIGFIX 1
+
+
+// #define CCSO_BAND_NUM 128
+// #define CCSO_NUM_COMPONENTS 3
+// #define CONFIG_D143_CCSO_FM_FLAG 1
+
 #define UNDISP_QUEUE_SIZE (REF_FRAMES * 10)
 // 4 scratch frames for the new frames to support a maximum of 4 cores decoding
 // in parallel, 3 for scaled references on the encoder.

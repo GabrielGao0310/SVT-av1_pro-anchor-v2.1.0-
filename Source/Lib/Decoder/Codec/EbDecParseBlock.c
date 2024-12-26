@@ -331,6 +331,60 @@ static void read_cdef(ParseCtxt *parse_ctxt, PartitionInfo *xd) {
     }
 }
 
+// static void read_ccso(ParseCtxt *parse_ctxt, PartitionInfo *xd) {
+//     SvtReader           *r    = &parse_ctxt->r;
+//     BlockModeInfo *const mbmi = xd->mi;
+//     if (parse_ctxt->frame_header->coded_lossless || parse_ctxt->frame_header->allow_intrabc) {
+//         return;
+//     }
+//     FRAME_CONTEXT *const ec_ctx = &parse_ctxt->cur_tile_ctx;
+//     FrameHeader *frame_header = parse_ctxt->frame_header;
+
+
+// //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+//   const int mi_row = xd->mi_row;
+//   const int mi_col = xd->mi_col;
+//   const int blk_size_y =
+//       (1 << (CCSO_BLK_SIZE + 1 - MI_SIZE_LOG2)) - 1;
+//     //   (1 << (CCSO_BLK_SIZE + xd->plane[1].subsampling_y - MI_SIZE_LOG2)) - 1;
+//   const int blk_size_x =
+//       (1 << (CCSO_BLK_SIZE + 1 - MI_SIZE_LOG2)) - 1;
+//     //   (1 << (CCSO_BLK_SIZE + xd->plane[1].subsampling_x - MI_SIZE_LOG2)) - 1;
+
+//   if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+//       frame_header->ccso_info.ccso_enable[0]) {
+//     const int blk_idc =
+//         svt_read_symbol(r, ec_ctx->ccso_cdf[0], 2, ACCT_INFO("blk_idc"));
+//     xd->ccso_blk_y = blk_idc;
+//     mi_params
+//         ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
+//                        (mi_col & ~blk_size_x)]
+//         ->ccso_blk_y = blk_idc;
+//   }
+
+//   if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+//       cm->ccso_info.ccso_enable[1]) {
+//     const int blk_idc =
+//         svt_read_symbol(r, xd->tile_ctx->ccso_cdf[1], 2, ACCT_INFO("blk_idc"));
+//     xd->ccso_blk_u = blk_idc;
+//     mi_params
+//         ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
+//                        (mi_col & ~blk_size_x)]
+//         ->ccso_blk_u = blk_idc;
+//   }
+
+//   if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+//       cm->ccso_info.ccso_enable[2]) {
+//     const int blk_idc =
+//         svt_read_symbol(r, xd->tile_ctx->ccso_cdf[2], 2, ACCT_INFO("blk_idc"));
+//     xd->ccso_blk_v = blk_idc;
+//     mi_params
+//         ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
+//                        (mi_col & ~blk_size_x)]
+//         ->ccso_blk_v = blk_idc;
+//   }
+// }
+
 static void read_delta_qindex(ParseCtxt *parse_ctxt, BlockModeInfo *const mbmi, int32_t *cur_qind,
                               int32_t *sb_delta_q) {
     SvtReader    *r              = &parse_ctxt->r;
@@ -584,6 +638,8 @@ static void intra_frame_mode_info(EbDecHandle *dec_handle, ParseCtxt *parse_ctxt
     }
 
     read_cdef(parse_ctxt, xd);
+    // if (parse_ctxt->seq_header->enable_ccso)
+    //     read_ccso(parse_ctxt, xd);
 
     read_delta_params(parse_ctxt, xd);
     parse_ctxt->read_deltas = 0;
@@ -1085,7 +1141,8 @@ static void inter_frame_mode_info(EbDecHandle *dec_handle, ParseCtxt *parse_ctxt
     }
 
     read_cdef(parse_ctxt, pi);
-
+    // if (parse_ctxt->seq_header->enable_ccso)
+    //     read_ccso(parse_ctxt, pi);
     read_delta_params(parse_ctxt, pi);
     parse_ctxt->read_deltas = 0;
 

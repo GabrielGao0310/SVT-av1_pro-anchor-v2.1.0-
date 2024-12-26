@@ -71,6 +71,8 @@ set(all_files
     EbCabacContextModel.h
     EbCdef.c
     EbCdef.h
+    EbCcso.c
+    EbCcso.h
     EbCoefficients.h
     EbCommonUtils.h
     EbDeblockingCommon.c

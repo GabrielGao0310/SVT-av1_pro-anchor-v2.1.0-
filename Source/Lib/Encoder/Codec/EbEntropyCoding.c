@@ -29,6 +29,8 @@
 #include "EbInterPrediction.h"
 #include "EbModeDecision.h"
 #include "EbRestoration.h"
+#include "EbCcso.h"
+#include "EbCdefProcess.h"
 
 static void mem_put_varsize(uint8_t *const dst, const int sz, const int val) {
     switch (sz) {
@@ -2349,6 +2351,67 @@ static void encode_cdef(const PictureParentControlSet *pcs, struct AomWriteBitBu
     }
 }
 
+// write CCSO offset idx using truncated unary coding
+static AOM_INLINE void write_ccso_offset_idx(struct AomWriteBitBuffer *wb, int offset_idx) {
+    for (int idx = 0; idx < 7; ++idx) {
+        svt_aom_wb_write_bit(wb, offset_idx != idx);
+        if (offset_idx == idx) break;
+    }
+}
+static AOM_INLINE void encode_ccso(const PictureParentControlSet *pcs, struct AomWriteBitBuffer *wb) {
+    // if (is_global_intrabc_allowed(cm)) return;
+    const FrameHeader *frm_hdr = &pcs->frm_hdr;
+    
+    const int ccso_offset[8] = { 0, 1, -1, 3, -3, 7, -7, -10 };
+#if CONFIG_D143_CCSO_FM_FLAG
+    svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ccso_frame_flag, 1);
+    if (frm_hdr->ccso_info.ccso_frame_flag) {
+#endif  // CONFIG_D143_CCSO_FM_FLAG
+        for (int plane = 0; plane < av1_num_planes(&pcs->scs->seq_header.color_config); plane++) {
+            svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ccso_enable[plane], 1);
+            if (frm_hdr->ccso_info.ccso_enable[plane]) {
+                svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ccso_bo_only[plane], 1);
+#if !CONFIG_CCSO_SIGFIX
+                svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.quant_idx[plane], 2);
+                svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ext_filter_support[plane], 3);
+#endif  // !CONFIG_CCSO_SIGFIX
+                if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
+                    svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.max_band_log2[plane], 3);
+                } else {
+#if CONFIG_CCSO_SIGFIX
+                    svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.quant_idx[plane], 2);
+                    svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ext_filter_support[plane], 3);
+                    svt_aom_wb_write_bit(wb, frm_hdr->ccso_info.edge_clf[plane]);
+#endif  // CONFIG_CCSO_SIGFIX
+                    svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.max_band_log2[plane], 2);
+                }
+                const int max_band = 1 << frm_hdr->ccso_info.max_band_log2[plane];
+                const int edge_clf = frm_hdr->ccso_info.edge_clf[plane];
+#if !CONFIG_CCSO_SIGFIX
+                svt_aom_wb_write_bit(wb, edge_clf);
+#endif  // !CONFIG_CCSO_SIGFIX
+                const int max_edge_interval = edge_clf_to_edge_interval[edge_clf];
+                const int num_edge_offset_intervals = frm_hdr->ccso_info.ccso_bo_only[plane] ? 1 : max_edge_interval;
+                for (int d0 = 0; d0 < num_edge_offset_intervals; d0++) {
+                    for (int d1 = 0; d1 < num_edge_offset_intervals; d1++) {
+                            for (int band_num = 0; band_num < max_band; band_num++) {
+                                const int lut_idx_ext = (band_num << 4) + (d0 << 2) + d1;
+                                    for (int offset_idx = 0; offset_idx < 8; offset_idx++) {
+                                        if (frm_hdr->ccso_info.filter_offset[plane][lut_idx_ext] == ccso_offset[offset_idx]) {
+                                            write_ccso_offset_idx(wb, offset_idx);
+                                            break;
+                                        }
+                                    }
+                            }
+                    }
+                }
+      }
+    }
+#if CONFIG_D143_CCSO_FM_FLAG
+  }
+#endif  // CONFIG_D143_CCSO_FM_FLAG
+}
+
 static void write_delta_q(struct AomWriteBitBuffer *wb, int32_t delta_q) {
     if (delta_q != 0) {
         svt_aom_wb_write_bit(wb, 1);
@@ -2799,6 +2862,7 @@ static void write_sequence_header(SequenceControlSet *scs, struct AomWriteBitBuf
 
     svt_aom_wb_write_bit(wb, scs->seq_header.enable_superres);
     svt_aom_wb_write_bit(wb, scs->seq_header.cdef_level);
+    svt_aom_wb_write_bit(wb, scs->seq_header.enable_ccso);
     svt_aom_wb_write_bit(wb, scs->seq_header.enable_restoration);
 }
 
@@ -3533,6 +3597,15 @@ static void write_uncompressed_header_obu(SequenceControlSet *scs /*Av1Comp *cpi
 
         if (scs->seq_header.enable_restoration)
             encode_restoration_mode(pcs, wb);
+        
+#if CCSO
+        scs->seq_header.enable_ccso = 1;
+#else
+        scs->seq_header.enable_ccso = 0;
+#endif
+        if (scs->seq_header.enable_ccso) {
+            encode_ccso(pcs, wb);
+        }
     }
 
     svt_aom_wb_write_bit(wb, frm_hdr->tx_mode == TX_MODE_SELECT);
@@ -3923,6 +3996,55 @@ static void write_cdef(SequenceControlSet *seqCSetPtr, PictureControlSet *p_pcs_
         aom_write_literal(w, mi->mbmi.cdef_strength, frm_hdr->cdef_params.cdef_bits);
         p_pcs_ptr->cdef_preset[tile_idx][index] = mi->mbmi.cdef_strength;
     }
+}
+
+
+static  void write_ccso(SequenceControlSet *seqCSetPtr, PictureControlSet *p_pcs_ptr,
+                       //Av1Common *cm,
+                       uint16_t tile_idx, MacroBlockD *const xd, AomWriter *w, int32_t mi_col,
+                       int32_t mi_row) {
+    (void)xd;
+    Av1Common   *cm      = p_pcs_ptr->ppcs->av1_cm;
+    FrameHeader *frm_hdr = &p_pcs_ptr->ppcs->frm_hdr;
+    FRAME_CONTEXT      *frame_context        = p_pcs_ptr->ec_info[tile_idx]->ec->fc; //
+
+
+    if (frm_hdr->coded_lossless || frm_hdr->allow_intrabc) {
+        // Initialize to indicate no CCSO for safety.
+        // frm_hdr->ccso_info.
+        return;
+    }
+
+  const int blk_size_y =
+      (1 << (CCSO_BLK_SIZE + 1 - MI_SIZE_LOG2)) - 1;
+    //   (1 << (CCSO_BLK_SIZE + xd->plane[1].subsampling_y - MI_SIZE_LOG2)) - 1;
+  const int blk_size_x =
+      (1 << (CCSO_BLK_SIZE + 1 - MI_SIZE_LOG2)) - 1;
+    //   (1 << (CCSO_BLK_SIZE + xd->plane[1].subsampling_x - MI_SIZE_LOG2)) - 1;
+  const MbModeInfo *mbmi =
+      &(p_pcs_ptr->mi_grid_base[(mi_row & ~blk_size_y) * p_pcs_ptr->mi_stride +
+                              (mi_col & ~blk_size_x)]->mbmi);
+
+  if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+      frm_hdr->ccso_info.ccso_enable[0]) {
+    aom_write_symbol(w, mbmi->ccso_blk_y == 0 ? 0 : 1,
+                     frame_context->ccso_cdf[0], 2);
+    xd->ccso_blk_y = mbmi->ccso_blk_y;
+  }
+
+  if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+      frm_hdr->ccso_info.ccso_enable[1]) {
+    aom_write_symbol(w, mbmi->ccso_blk_u == 0 ? 0 : 1,
+                     xd->tile_ctx->ccso_cdf[1], 2);
+    xd->ccso_blk_u = mbmi->ccso_blk_u;
+  }
+
+  if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) &&
+      frm_hdr->ccso_info.ccso_enable[2]) {
+    aom_write_symbol(w, mbmi->ccso_blk_v == 0 ? 0 : 1,
+                     xd->tile_ctx->ccso_cdf[2], 2);
+    xd->ccso_blk_v = mbmi->ccso_blk_v;
+  }
 }
 
 void svt_av1_reset_loop_restoration(PictureControlSet *piCSetPtr, uint16_t tile_idx) {
@@ -4842,6 +4964,20 @@ static EbErrorType write_modes_b(PictureControlSet *pcs, EntropyCodingContext *e
                    skip_coeff,
                    blk_org_x >> MI_SIZE_LOG2,
                    blk_org_y >> MI_SIZE_LOG2);
+#if CCSO
+        scs->seq_header.enable_ccso = 1;
+#else
+        scs->seq_header.enable_ccso = 0;
+#endif
+        if (scs->seq_header.enable_ccso) write_ccso(scs,
+                                                    pcs,
+                                                    tile_idx,
+                                                    blk_ptr->av1xd,
+                                                    ec_writer,
+                                                    // skip_coeff,
+                                                    blk_org_x >> MI_SIZE_LOG2,
+                                                    blk_org_y >> MI_SIZE_LOG2);
+
         if (pcs->ppcs->frm_hdr.delta_q_params.delta_q_present) {
             int32_t current_q_index        = blk_ptr->qindex;
             int32_t super_block_upper_left = (((blk_org_y >> 2) & (scs->seq_header.sb_mi_size - 1)) == 0) &&
@@ -4984,6 +5120,21 @@ static EbErrorType write_modes_b(PictureControlSet *pcs, EntropyCodingContext *e
                    skip_mode ? 1 : skip_coeff,
                    blk_org_x >> MI_SIZE_LOG2,
                    blk_org_y >> MI_SIZE_LOG2);
+
+#if CCSO
+        scs->seq_header.enable_ccso = 1;
+#else
+        scs->seq_header.enable_ccso = 0;
+#endif
+        if (scs->seq_header.enable_ccso) write_ccso(scs,
+                                                    pcs,
+                                                    tile_idx,
+                                                    blk_ptr->av1xd,
+                                                    ec_writer,
+                                                    // skip_coeff,
+                                                    blk_org_x >> MI_SIZE_LOG2,
+                                                    blk_org_y >> MI_SIZE_LOG2);
+
         if (pcs->ppcs->frm_hdr.delta_q_params.delta_q_present) {
             int32_t current_q_index        = blk_ptr->qindex;
             int32_t super_block_upper_left = (((blk_org_y >> 2) & (scs->seq_header.sb_mi_size - 1)) == 0) &&
@@ -5282,7 +5433,7 @@ static EbErrorType write_modes_b(PictureControlSet *pcs, EntropyCodingContext *e
 EB_EXTERN EbErrorType svt_aom_write_sb(EntropyCodingContext *ec_ctx, SuperBlock *tb_ptr, PictureControlSet *pcs,
                                        uint16_t tile_idx, EntropyCoder *ec, EbPictureBufferDesc *coeff_ptr) {
     EbErrorType         return_error         = EB_ErrorNone;
-    FRAME_CONTEXT      *frame_context        = ec->fc;
+    FRAME_CONTEXT      *frame_context        = ec->fc; //pcs->ec_info[tile_idx]->ec
     AomWriter          *ec_writer            = &ec->ec_writer;
     SequenceControlSet *scs                  = pcs->scs;
     NeighborArrayUnit  *partition_context_na = pcs->partition_context_na[tile_idx];

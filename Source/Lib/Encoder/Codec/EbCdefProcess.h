@@ -15,6 +15,8 @@
 #include "EbSystemResourceManager.h"
 #include "EbObject.h"
 
+#define CCSO 1
+
 /**************************************
  * Extern Function Declarations
  **************************************/

@@ -234,6 +234,8 @@ typedef struct SeqHeader {
          0: specifies that cdef filtering is disabled */
     uint8_t cdef_level;
 
+    uint8_t enable_ccso;         // To turn on/off CCSO
+
     /*!< 1: Specifies that loop restoration filtering may be enabled.
          0: Specifies that loop restoration filtering is disabled*/
     uint8_t enable_restoration;
@@ -401,6 +403,28 @@ typedef struct GlobalMotionParams {
     int32_t gm_params[6];
 
 } GlobalMotionParams;
+
+/** ccso info */
+typedef struct {
+  /** ccso band offset only option */
+  uint8_t ccso_bo_only[CCSO_NUM_COMPONENTS];
+#if CONFIG_D143_CCSO_FM_FLAG
+  /** ccso frame flag */
+  bool ccso_frame_flag;
+#endif  // CONFIG_D143_CCSO_FM_FLAG
+  /** ccso enable */
+  bool ccso_enable[CCSO_NUM_COMPONENTS];
+  /** ccso filter offset */
+  int8_t filter_offset[CCSO_NUM_COMPONENTS][CCSO_BAND_NUM * 16];
+  /** ccso log2 of max bands */
+  int max_band_log2[CCSO_NUM_COMPONENTS];
+  /** quant index */
+  uint8_t quant_idx[CCSO_NUM_COMPONENTS];
+  /** extended filter support */
+  uint8_t ext_filter_support[CCSO_NUM_COMPONENTS];
+  /** edge classifier index */
+  uint8_t edge_clf[CCSO_NUM_COMPONENTS];
+} CcsoInfo;
 
 typedef struct FrameHeader {
     /*!< 1: Indicates the frame indexed by frame_to_show_map_idx is to be output.
@@ -571,6 +595,11 @@ typedef struct FrameHeader {
 
     /*!< Global Motion Paramters */
     //GlobalMotionParams      global_motion_params[ALTREF_FRAME + 1];
+
+    /*!
+    * CCSO (Cross Component Sample Offset) parameters.
+    */
+    CcsoInfo ccso_info;
 
     /*!< Film Grain Parameters */
     AomFilmGrain film_grain_params;

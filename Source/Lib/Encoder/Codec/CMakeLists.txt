@@ -50,6 +50,8 @@ set(all_files
         EbDlfProcess.h
         EbEncCdef.c
         EbEncCdef.h
+        EbPickccso.c
+        EbPickccso.h
         EbEncDecProcess.c
         EbEncDecProcess.h
         EbEncDecResults.c

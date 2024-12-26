@@ -638,6 +638,9 @@ static const AomCdfProb default_switchable_restore_cdf[CDF_SIZE(RESTORE_SWITCHAB
 
 static const AomCdfProb default_wiener_restore_cdf[CDF_SIZE(2)] = {AOM_CDF2(11570)};
 
+static const AomCdfProb default_ccso_cdf[CDF_SIZE(2)] = { AOM_CDF2(11570) };
+
+
 static const AomCdfProb default_sgrproj_restore_cdf[CDF_SIZE(2)] = {AOM_CDF2(16855)};
 
 static const AomCdfProb default_delta_q_cdf[CDF_SIZE(DELTA_Q_PROBS + 1)] = {AOM_CDF4(28160, 32120, 32677)};
@@ -773,6 +776,9 @@ void svt_aom_init_mode_probs(FRAME_CONTEXT *fc) {
     svt_memcpy(fc->filter_intra_mode_cdf, default_filter_intra_mode_cdf, sizeof(default_filter_intra_mode_cdf));
     svt_memcpy(fc->switchable_restore_cdf, default_switchable_restore_cdf, sizeof(default_switchable_restore_cdf));
     svt_memcpy(fc->wiener_restore_cdf, default_wiener_restore_cdf, sizeof(default_wiener_restore_cdf));
+    for (int plane = 0; plane < MAX_MB_PLANE; plane++) {
+        svt_memcpy(fc->ccso_cdf[plane], default_ccso_cdf, sizeof(default_ccso_cdf));
+    }
     svt_memcpy(fc->sgrproj_restore_cdf, default_sgrproj_restore_cdf, sizeof(default_sgrproj_restore_cdf));
     svt_memcpy(fc->y_mode_cdf, default_if_y_mode_cdf, sizeof(default_if_y_mode_cdf));
     svt_memcpy(fc->uv_mode_cdf, default_uv_mode_cdf, sizeof(default_uv_mode_cdf));
@@ -2417,6 +2423,9 @@ void svt_av1_reset_cdf_symbol_counters(FRAME_CONTEXT *fc) {
     RESET_CDF_COUNTER(fc->filter_intra_mode_cdf, FILTER_INTRA_MODES);
     RESET_CDF_COUNTER(fc->switchable_restore_cdf, RESTORE_SWITCHABLE_TYPES);
     RESET_CDF_COUNTER(fc->wiener_restore_cdf, 2);
+    for (int plane = 0; plane < MAX_MB_PLANE; plane++) {
+        RESET_CDF_COUNTER(fc->ccso_cdf[plane], 2);
+    }
     RESET_CDF_COUNTER(fc->sgrproj_restore_cdf, 2);
     RESET_CDF_COUNTER(fc->y_mode_cdf, INTRA_MODES);
     RESET_CDF_COUNTER_STRIDE(fc->uv_mode_cdf[0], UV_INTRA_MODES - 1, CDF_SIZE(UV_INTRA_MODES));
