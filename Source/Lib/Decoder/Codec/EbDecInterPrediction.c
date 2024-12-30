@@ -32,6 +32,8 @@
 #include "EbDefinitions.h"
 #include "EbWarpedMotion.h"
 
+#include "EbCcso.h"
+
 static INLINE void dec_clamp_mv(MV *mv, int32_t min_col, int32_t max_col, int32_t min_row, int32_t max_row) {
     mv->col = (int16_t)clamp(mv->col, min_col, max_col);
     mv->row = (int16_t)clamp(mv->row, min_row, max_row);

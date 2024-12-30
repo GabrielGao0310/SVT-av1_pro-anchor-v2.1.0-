@@ -25,10 +25,8 @@
 #include "EbUtility.h"
 #include "EbPictureControlSet.h"
 #include "EbResize.h"
-
-#if CCSO
 #include "EbPickccso.h"
-#endif
+
 
 void svt_av1_setup_dst_planes(PictureControlSet *pcs, struct MacroblockdPlane *planes, BlockSize bsize,
                               //const Yv12BufferConfig *src,
@@ -397,9 +395,19 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         frm_hdr                  = &pcs->ppcs->frm_hdr;
         CdefControls *cdef_ctrls = &pcs->ppcs->cdef_ctrls;
         
+
+        if (!cdef_ctrls->use_reference_cdef_fs) {
+            if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
+                cdef_seg_search(pcs, scs, dlf_results->segment_index);
+            }
+        }
+        //all seg based search is done. update total processed segments. if all done, finish the search and perfrom application.
+        svt_block_on_mutex(pcs->cdef_search_mutex);
+        // cdef_and_ccso(pcs); // 尝试外部函数解决多线程问题，未果
+
         // printf("\nccso\n");
-    #if CCSO
-        uint8_t* ref_yuv[3];
+#if CCSO
+        uint8_t* ref_yuv[3] = {NULL, NULL, NULL};
         EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic;
         const uint32_t       input_offset_y = ref->org_x + ref->org_y * ref->stride_y;
         ref_yuv[0]           = ref->buffer_y + (input_offset_y << is_16bit);
@@ -408,8 +416,8 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         const uint32_t input_offset_cr      = (ref->org_x + ref->org_y * ref->stride_cr) >> 1;
         ref_yuv[2]           = ref->buffer_cr + (input_offset_cr << is_16bit);
 
-        uint16_t *rec_uv[CCSO_NUM_COMPONENTS];
-        uint16_t *org_uv[CCSO_NUM_COMPONENTS];
+        uint16_t *rec_uv[CCSO_NUM_COMPONENTS] = {NULL, NULL, NULL};
+        uint16_t *org_uv[CCSO_NUM_COMPONENTS] = {NULL, NULL, NULL};
         uint16_t *ext_rec_y = NULL;
         const int num_planes = av1_num_planes(&scs->seq_header.color_config);
         // printf("\nccso begin\n");
@@ -438,32 +446,37 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         const int ccso_stride_ext = pd[0].dst.width + (CCSO_PADDING_SIZE << 1);
 
         for (int pli = 0; pli < num_planes; pli++) {
-            rec_uv[pli] = svt_aom_malloc(sizeof(*rec_uv[pli]) * pd[0].dst.height *
-                                    ccso_stride);
-            org_uv[pli] = svt_aom_malloc(sizeof(*org_uv[pli]) * pd[0].dst.height *
-                                    ccso_stride);
-        }
-
-        double mse1[3] = {0, 0, 0}; //rec和org
-        double mse2[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
-        for (int p = 0; p < 3; p++){
-            for(int i = 0; i < pd[p].dst.height; i++){
-                for (int j = 0; j < pd[p].dst.width; j++) {
-                    mse1[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
-                    int std = p==0 ? ref->stride_y : ref->stride_cb;
-                    // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
-                    uint8_t* buf = ref_yuv[p];
-                    mse2[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
-                }
+            if (rec_uv[pli] == NULL) {
+                rec_uv[pli] = svt_aom_malloc(sizeof(*rec_uv[pli]) * pd[0].dst.height * ccso_stride);
+                // printf("\nmalloc rec_uv[%d]\n", pli);
             }
-            mse1[p] = mse1[p] / (pd[p].dst.height * pd[p].dst.width);
-            mse2[p] = mse2[p] / (pd[p].dst.height * pd[p].dst.width);
+            if (org_uv[pli] == NULL) {
+                org_uv[pli] = svt_aom_malloc(sizeof(*org_uv[pli]) * pd[0].dst.height * ccso_stride);
+                // printf("\nmalloc org_uv[%d]\n", pli);
+            }
         }
 
-        ext_rec_y =
-            svt_aom_malloc(sizeof(*ext_rec_y) *
-                    (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) *
-                    (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
+        // double mse1[3] = {0, 0, 0}; //rec和org
+        // double mse2[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+        // for (int p = 0; p < 3; p++){
+        //     for(int i = 0; i < pd[p].dst.height; i++){
+        //         for (int j = 0; j < pd[p].dst.width; j++) {
+        //             mse1[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+        //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+        //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+        //             uint8_t* buf = ref_yuv[p];
+        //             mse2[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+        //         }
+        //     }
+        //     mse1[p] = mse1[p] / (pd[p].dst.height * pd[p].dst.width);
+        //     mse2[p] = mse2[p] / (pd[p].dst.height * pd[p].dst.width);
+        // }
+
+        if (ext_rec_y == NULL) {
+            ext_rec_y = svt_aom_malloc(sizeof(*ext_rec_y) * (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) * (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
+            // printf("\nmalloc ext_rec_y\n");
+        }
+
         for (int pli = 0; pli < 1; pli++) {
             const int pic_height = pd[pli].dst.height;
             const int pic_width = pd[pli].dst.width;
@@ -477,15 +490,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             }
         }
         extend_ccso_border(ext_rec_y, CCSO_PADDING_SIZE, pd);
-    #endif
-
-        if (!cdef_ctrls->use_reference_cdef_fs) {
-            if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
-                cdef_seg_search(pcs, scs, dlf_results->segment_index);
-            }
-        }
-        //all seg based search is done. update total processed segments. if all done, finish the search and perfrom application.
-        svt_block_on_mutex(pcs->cdef_search_mutex);
+#endif
 
         pcs->tot_seg_searched_cdef++;
         if (pcs->tot_seg_searched_cdef == pcs->cdef_segments_total_count) {
@@ -506,7 +511,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 frm_hdr->cdef_params.cdef_uv_strength[0] = 0;
             }
 
-    #if CCSO
+#if CCSO
             svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
             svt_av1_setup_dst_planes( pcs, pd, pcs->ppcs->scs->seq_header.sb_size, recon_pic, 0, 0, 0, num_planes);
 
@@ -546,27 +551,18 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                     // 8bit
                     switch (pli) {
                         case 0:{
-                            // for (int i = 0; i < ref->luma_size; i++) {
-                            //     ref_buffer[i] = (uint16_t)ref->buffer_y[i];
-                            // }
                             ref_buffer_8bit = ref_yuv[pli];
                             ref_stride = ref->stride_y;
                             break;
                         }
 
                         case 1:{
-                            // for (int i = 0; i < ref->chroma_size; i++) {
-                            //     ref_buffer[i] = (uint16_t)ref->buffer_cb[i];
-                            // }
                             ref_buffer_8bit = ref_yuv[pli];
                             ref_stride = ref->stride_cb;
                             break;
                         }
 
                         case 2:{
-                            // for (int i = 0; i < ref->chroma_size; i++) {
-                            //     ref_buffer[i] = (uint16_t)ref->buffer_cr[i];
-                            // }
                             ref_buffer_8bit = ref_yuv[pli];
                             ref_stride = ref->stride_cr;
                             break;
@@ -593,27 +589,23 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 pcs->ppcs->frm_hdr.quantization_params.base_q_idx,
                 FALSE);
             lambda   = full_lambda;
-            // uint8_t   bit_depth   = pcs->hbd_md ? 10 : 8;
 
-            // int32_t rdmult    = svt_aom_compute_rd_mult(pcs, ppcs->frm_hdr.quantization_params.base_q_idx, 
-            // ppcs->frm_hdr.quantization_params.base_q_idx, bit_depth);
-
-            // 算一下rec和org的sse，好像不大对劲
-            double mse3[3] = {0, 0, 0}; //rec和org
-            double mse4[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
-            for (int p = 0; p < 3; p++){
-                for(int i = 0; i < pd[p].dst.height; i++){
-                    for (int j = 0; j < pd[p].dst.width; j++) {
-                        mse3[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
-                        int std = p==0 ? ref->stride_y : ref->stride_cb;
-                        // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
-                        uint8_t* buf = ref_yuv[p];
-                        mse4[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
-                    }
-                }
-                mse3[p] = mse3[p] / (pd[p].dst.height * pd[p].dst.width);
-                mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
-            }
+            // // 算一下rec和org的sse，好像不大对劲
+            // double mse3[3] = {0, 0, 0}; //rec和org
+            // double mse4[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+            // for (int p = 0; p < 3; p++){
+            //     for(int i = 0; i < pd[p].dst.height; i++){
+            //         for (int j = 0; j < pd[p].dst.width; j++) {
+            //             mse3[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+            //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+            //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+            //             uint8_t* buf = ref_yuv[p];
+            //             mse4[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+            //         }
+            //     }
+            //     mse3[p] = mse3[p] / (pd[p].dst.height * pd[p].dst.width);
+            //     mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
+            // }
 
 
 
@@ -621,31 +613,45 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             ccso_frame(recon_pic, pcs, pd, ext_rec_y);
 
 
-            // 算一下rec和org的sse，好像不大对劲
-            double mse5[3] = {0, 0, 0}; //rec和org
-            double mse6[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
-            for (int p = 0; p < 3; p++){
-                for(int i = 0; i < pd[p].dst.height; i++){
-                    for (int j = 0; j < pd[p].dst.width; j++) {
-                        mse5[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
-                        int std = p==0 ? ref->stride_y : ref->stride_cb;
-                        // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
-                        uint8_t* buf = ref_yuv[p];
-                        mse6[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
-                    }
-                }
-                mse5[p] = mse5[p] / (pd[p].dst.height * pd[p].dst.width);
-                mse6[p] = mse6[p] / (pd[p].dst.height * pd[p].dst.width);
-
+            // // 算一下rec和org的sse，好像不大对劲
+            // double mse5[3] = {0, 0, 0}; //rec和org
+            // double mse6[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+            // for (int p = 0; p < 3; p++){
+            //     for(int i = 0; i < pd[p].dst.height; i++){
+            //         for (int j = 0; j < pd[p].dst.width; j++) {
+            //             mse5[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+            //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+            //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+            //             uint8_t* buf = ref_yuv[p];
+            //             mse6[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+            //         }
+            //     }
+            //     mse5[p] = mse5[p] / (pd[p].dst.height * pd[p].dst.width);
+            //     mse6[p] = mse6[p] / (pd[p].dst.height * pd[p].dst.width);
+            // }
+            
+            if (ext_rec_y != NULL) {
+                svt_aom_free(ext_rec_y);
+                // printf("\nfree ext_rec_y\n");
+                ext_rec_y = NULL;
             }
-            svt_aom_free(ext_rec_y);
             
             for (int pli = 0; pli < num_planes; pli++) {
-                svt_aom_free(rec_uv[pli]);
-                svt_aom_free(org_uv[pli]);
+                if (rec_uv[pli] != NULL) {
+                    svt_aom_free(rec_uv[pli]);
+                    // printf("\nfree rec_uv[%d]\n", pli);
+                    rec_uv[pli] = NULL;  // 防止重复释放
+                }
+                if (org_uv[pli] != NULL) {
+                    svt_aom_free(org_uv[pli]);
+                    // printf("\nfree org_uv[%d]\n", pli);
+                    org_uv[pli] = NULL;  // 防止重复释放
+                }
             }      
-    #endif
+#endif
+        }
 
+        if (pcs->tot_seg_searched_cdef == pcs->cdef_segments_total_count) {
             //restoration prep
             Bool is_lr = ppcs->enable_restoration && frm_hdr->allow_intrabc == 0;
             if (is_lr) {
@@ -711,10 +717,8 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             }
         }
 
-        // cdef_and_ccso(pcs, dlf_results, context_ptr, cdef_results_wrapper, cdef_results);
-
-
         svt_release_mutex(pcs->cdef_search_mutex);
+   
 
         // Release Dlf Results
         svt_release_object(dlf_results_wrapper);

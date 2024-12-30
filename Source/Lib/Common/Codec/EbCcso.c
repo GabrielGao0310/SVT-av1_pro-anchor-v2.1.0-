@@ -1,4 +1,94 @@
 #include "EbCcso.h"
+#include "EbBitstreamUnit.h"
+#include "common_dsp_rtcd.h"
+
+
+void ccso_filter_block_hbd_with_buf_c(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0,
+                                   const uint8_t *src_cls1, const int src_y_stride, const int dst_stride,
+                                   const int src_cls_stride, const int x, const int y, const int pic_width,
+                                   const int pic_height, const int8_t *filter_offset, const int blk_size,
+                                   const int y_uv_hscale, const int y_uv_vscale, const int max_val,
+                                   const uint8_t shift_bits, const uint8_t ccso_bo_only) {
+   if (ccso_bo_only) {
+       (void)src_cls0;
+       (void)src_cls1;
+   }
+   int       cur_src_cls0;
+   int       cur_src_cls1;
+   const int y_end = AOMMIN(pic_height - y, blk_size);
+   const int x_end = AOMMIN(pic_width - x, blk_size);
+   for (int y_start = 0; y_start < y_end; y_start++) {
+       const int y_pos = y_start;
+       for (int x_start = 0; x_start < x_end; x_start++) {
+           const int x_pos = x + x_start;
+           if (!ccso_bo_only) {
+               cur_src_cls0 = src_cls0[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)];
+               cur_src_cls1 = src_cls1[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)];
+           } else {
+               cur_src_cls0 = 0;
+               cur_src_cls1 = 0;
+           }
+           const int band_num    = src_y[(y_pos << y_uv_vscale) * src_y_stride + (x_pos << y_uv_hscale)] >> shift_bits;
+           const int lut_idx_ext = (band_num << 4) + (cur_src_cls0 << 2) + cur_src_cls1;
+           const int offset_val  = filter_offset[lut_idx_ext];
+           dst_yuv[y_pos * dst_stride + x_pos] = clamp(offset_val + dst_yuv[y_pos * dst_stride + x_pos], 0, max_val);
+       }
+   }
+}
+
+
+void ccso_derive_src_block_c(const uint16_t *src_y, uint8_t *const src_cls0, uint8_t *const src_cls1,
+                          const int src_y_stride, const int src_cls_stride, const int x, const int y,
+                          const int pic_width, const int pic_height, const int y_uv_hscale, const int y_uv_vscale,
+                          const int qstep, const int neg_qstep, const int *src_loc, const int blk_size,
+                          const int edge_clf) {
+   int       src_cls[2];
+   const int y_end = AOMMIN(pic_height - y, blk_size);
+   const int x_end = AOMMIN(pic_width - x, blk_size);
+   for (int y_start = 0; y_start < y_end; y_start++) {
+       const int y_pos = y_start;
+       for (int x_start = 0; x_start < x_end; x_start++) {
+           const int x_pos = x + x_start;
+           cal_filter_support(src_cls,
+                              &src_y[(y_pos << y_uv_vscale) * src_y_stride + (x_pos << y_uv_hscale)],
+                              qstep,
+                              neg_qstep,
+                              src_loc,
+                              edge_clf);
+           src_cls0[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)] = src_cls[0];
+           src_cls1[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)] = src_cls[1];
+       }
+   }
+}
+
+uint64_t compute_distortion_block_c(const uint16_t *org, const int org_stride, const uint16_t *rec16,
+                                 const int rec_stride, const int x, const int y, const int log2_filter_unit_size,
+                                 const int height, const int width) {
+   int      err;
+   uint64_t ssd = 0;
+   int      y_offset;
+   int      x_offset;
+   if (y + (1 << log2_filter_unit_size) >= height)
+       y_offset = height - y;
+   else
+       y_offset = (1 << log2_filter_unit_size);
+
+   if (x + (1 << log2_filter_unit_size) >= width)
+       x_offset = width - x;
+   else
+       x_offset = (1 << log2_filter_unit_size);
+
+   for (int y_off = 0; y_off < y_offset; y_off++) {
+       for (int x_off = 0; x_off < x_offset; x_off++) {
+           err = org[org_stride * y_off + x + x_off] - rec16[rec_stride * y_off + x + x_off];
+           ssd += err * err;
+       }
+   }
+   return ssd;
+}
+
+
+
 
 static INLINE int32_t scaled_buffer_offset1(int32_t x_offset, int32_t y_offset, int32_t stride/*,
     const struct scale_factors *sf*/) {
@@ -168,7 +258,7 @@ void cal_filter_support(int *rec_luma_idx, const uint16_t *rec_y, const uint8_t 
    }
 }
 
-void ccso_filter_block_hbd_wo_buf(const uint16_t *src_y, uint8_t *dst_yuv, const int x, const int y,
+void ccso_filter_block_hbd_wo_buf_c(const uint16_t *src_y, uint16_t *dst_yuv, const int x, const int y,
                                  const int pic_width, const int pic_height, int *src_cls, const int8_t *offset_buf,
                                  const int src_y_stride, const int dst_stride, const int y_uv_hscale,
                                  const int y_uv_vscale, const int thr, const int neg_thr, const int *src_loc,
@@ -205,7 +295,7 @@ void ccso_filter_block_hbd_wo_buf(const uint16_t *src_y, uint8_t *dst_yuv, const
 
 /* Apply CCSO on luma component when multiple bands are applied */
 void ccso_apply_luma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
-                              uint8_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                              uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                               const uint8_t max_band_log2, const int edge_clf) {
    //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
    FrameHeader *frm_hdr = &pcs->ppcs->frm_hdr;
@@ -231,7 +321,7 @@ void ccso_apply_luma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, con
            if (!use_ccso)
                continue;
            if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
-               ccso_filter_block_hbd_wo_buf(src_y,
+               ccso_filter_block_hbd_wo_buf_c(src_y,
                                             dst_yuv,
                                             x,
                                             y,
@@ -283,7 +373,7 @@ void ccso_apply_luma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, con
 
 /* Apply CCSO on luma component when single band is applied */
 void ccso_apply_luma_sb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
-                              uint8_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                              uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                               const uint8_t max_band_log2, const int edge_clf) {
    (void)max_band_log2;
    FrameHeader *frm_hdr = &pcs->ppcs->frm_hdr;
@@ -311,7 +401,7 @@ void ccso_apply_luma_sb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, con
            if (!use_ccso)
                continue;
            if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
-               ccso_filter_block_hbd_wo_buf(src_y,
+               ccso_filter_block_hbd_wo_buf_c(src_y,
                                             dst_yuv,
                                             x,
                                             y,
@@ -363,7 +453,7 @@ void ccso_apply_luma_sb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, con
 
 /* Apply CCSO on chroma component when multiple bands are applied */
 void ccso_apply_chroma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
-                                uint8_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                                uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                                 const uint8_t max_band_log2, const int edge_clf) {
    FrameHeader *frm_hdr = &pcs->ppcs->frm_hdr;
 
@@ -395,7 +485,7 @@ void ccso_apply_chroma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, c
            if (!use_ccso)
                continue;
            if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
-               ccso_filter_block_hbd_wo_buf(src_y,
+               ccso_filter_block_hbd_wo_buf_c(src_y,
                                             dst_yuv,
                                             x,
                                             y,
@@ -445,9 +535,12 @@ void ccso_apply_chroma_mb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, c
    }
 }
 
+
+
+
 /* Apply CCSO on chroma component when single bands is applied */
 void ccso_apply_chroma_sb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
-                                uint8_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                                uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                                 const uint8_t max_band_log2, const int edge_clf) {
    (void)max_band_log2;
    FrameHeader *frm_hdr = &pcs->ppcs->frm_hdr;
@@ -474,10 +567,11 @@ void ccso_apply_chroma_sb_filter(PictureControlSet *pcs, MacroblockdPlane *pd, c
                (blk_size >> (MI_SIZE_LOG2 - pd[plane].subsampling_x)) * (x >> blk_log2);
            const bool use_ccso = (plane == 1) ? pcs->mi_grid_base[ccso_blk_idx]->mbmi.ccso_blk_u
                                               : pcs->mi_grid_base[ccso_blk_idx]->mbmi.ccso_blk_v;
+
            if (!use_ccso)
                continue;
            if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
-               ccso_filter_block_hbd_wo_buf(src_y,
+               ccso_filter_block_hbd_wo_buf_c(src_y,
                                             dst_yuv,
                                             x,
                                             y,
@@ -537,24 +631,49 @@ void ccso_frame(EbPictureBufferDesc *frame, PictureControlSet *pcs, MacroblockdP
    const int num_planes = av1_num_planes(&pcs->scs->seq_header.color_config);
    svt_av1_setup_dst_planes1(pcs, pd, pcs->ppcs->scs->seq_header.sb_size, frame, 0, 0, 0, num_planes);
 
+
+
    const uint8_t quant_sz[4] = {16, 8, 32, 64};
    for (int plane = 0; plane < num_planes; plane++) {
-       const int     dst_stride      = pd[plane].dst.stride;
-       const uint8_t quant_step_size = quant_sz[frm_hdr->ccso_info.quant_idx[plane]];
-       if (frm_hdr->ccso_info.ccso_enable[plane]) {
-           CCSO_FILTER_FUNC apply_ccso_filter_func = frm_hdr->ccso_info.max_band_log2[plane]
-               ? (plane > 0 ? ccso_apply_chroma_mb_filter : ccso_apply_luma_mb_filter)
-               : (plane > 0 ? ccso_apply_chroma_sb_filter : ccso_apply_luma_sb_filter);
-           apply_ccso_filter_func(pcs,
-                                  pd,
-                                  plane,
-                                  ext_rec_y,
-                                  &(pd[plane].dst.buf)[0],
-                                  dst_stride,
-                                  quant_step_size,
-                                  frm_hdr->ccso_info.ext_filter_support[plane],
-                                  frm_hdr->ccso_info.max_band_log2[plane],
-                                  frm_hdr->ccso_info.edge_clf[plane]);
-       }
+        // 把pd[plane].dst.buf放进16位中，处理完了再放回去
+        const int pic_height = pd[plane].dst.height;
+        const int pic_width = pd[plane].dst.width;
+        const int dst_stride = pd[plane].dst.stride;
+        uint16_t* dst_yuv16bit = (uint16_t *)malloc(dst_stride * pic_height * sizeof(uint16_t));
+
+        for (int r = 0; r < pic_height; ++r) {
+            for (int c = 0; c < pic_width; ++c) {
+                dst_yuv16bit[r * dst_stride + c] = (uint16_t)pd[plane].dst.buf[r * dst_stride + c];
+            }
+        }
+
+
+
+        // const int     dst_stride      = pd[plane].dst.stride;
+        const uint8_t quant_step_size = quant_sz[frm_hdr->ccso_info.quant_idx[plane]];
+        if (frm_hdr->ccso_info.ccso_enable[plane]) {
+            CCSO_FILTER_FUNC apply_ccso_filter_func = frm_hdr->ccso_info.max_band_log2[plane]
+                ? (plane > 0 ? ccso_apply_chroma_mb_filter : ccso_apply_luma_mb_filter)
+                : (plane > 0 ? ccso_apply_chroma_sb_filter : ccso_apply_luma_sb_filter);
+            apply_ccso_filter_func(pcs,
+                                    pd,
+                                    plane,
+                                    ext_rec_y,
+                                    // &(pd[plane].dst.buf)[0],
+                                    dst_yuv16bit,
+                                    dst_stride,
+                                    quant_step_size,
+                                    frm_hdr->ccso_info.ext_filter_support[plane],
+                                    frm_hdr->ccso_info.max_band_log2[plane],
+                                    frm_hdr->ccso_info.edge_clf[plane]);
+        }
+
+        for (int r = 0; r < pic_height; ++r) {
+            for (int c = 0; c < pic_width; ++c) {
+               pd[plane].dst.buf[r * dst_stride + c] = (uint8_t)dst_yuv16bit[r * dst_stride + c];
+            }
+        }
+        free(dst_yuv16bit);
+        dst_yuv16bit = NULL;
    }
 }

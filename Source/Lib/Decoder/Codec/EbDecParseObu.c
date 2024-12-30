@@ -32,7 +32,7 @@
 
 #include "EbDecUtils.h"
 #include "EbDecLF.h"
-
+#include "EbDecCcso.h"
 #include "EbDecCdef.h"
 #include "EbLog.h"
 

@@ -84,6 +84,8 @@ set(all_files
     Codec/EbDecBlock.h
     Codec/EbDecCdef.c
     Codec/EbDecCdef.h
+    Codec/EbDecCcso.c
+    Codec/EbDecCcso.h
     Codec/EbDecHandle.c
     Codec/EbDecHandle.h
     Codec/EbDecInterPrediction.c

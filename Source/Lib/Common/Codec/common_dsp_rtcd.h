@@ -1016,6 +1016,80 @@ extern "C" {
     uint8_t svt_aom_cdef_find_dir_avx2(const uint16_t *img, int32_t stride, int32_t *var, int32_t coeff_shift);
     RTCD_EXTERN uint8_t(*svt_aom_cdef_find_dir)(const uint16_t *img, int32_t stride, int32_t *var, int32_t coeff_shift);
 
+    uint64_t compute_distortion_block_c(const uint16_t *org, const int org_stride, const uint16_t *rec16,
+                                 const int rec_stride, const int x, const int y, const int log2_filter_unit_size,
+                                 const int height, const int width) ;
+    uint64_t compute_distortion_block_avx2(const uint16_t *org, const int org_stride, const uint16_t *rec16,
+                                 const int rec_stride, const int x, const int y, const int log2_filter_unit_size,
+                                 const int height, const int width) ;
+    RTCD_EXTERN uint64_t (*compute_distortion_block)(const uint16_t *org, const int org_stride, const uint16_t *rec16,
+                                 const int rec_stride, const int x, const int y, const int log2_filter_unit_size,
+                                 const int height, const int width) ;
+
+    void ccso_derive_src_block_c(const uint16_t *src_y, uint8_t *const src_cls0,
+                            uint8_t *const src_cls1, const int src_y_stride, const int ccso_stride,
+                            const int x, const int y, const int pic_width, const int pic_height,
+                            const int y_uv_hscale, const int y_uv_vscale, const int qstep,
+                            const int neg_qstep, const int *src_loc, const int blk_size, const int edge_clf);
+    void ccso_derive_src_block_avx2(const uint16_t *src_y, uint8_t *const src_cls0,
+                            uint8_t *const src_cls1, const int src_y_stride, const int ccso_stride,
+                            const int x, const int y, const int pic_width, const int pic_height,
+                            const int y_uv_hscale, const int y_uv_vscale, const int qstep,
+                            const int neg_qstep, const int *src_loc, const int blk_size, const int edge_clf);
+    RTCD_EXTERN void (*ccso_derive_src_block)(const uint16_t *src_y, uint8_t *const src_cls0,
+                            uint8_t *const src_cls1, const int src_y_stride, const int ccso_stride,
+                            const int x, const int y, const int pic_width, const int pic_height,
+                            const int y_uv_hscale, const int y_uv_vscale, const int qstep,
+                            const int neg_qstep, const int *src_loc, const int blk_size, const int edge_clf);
+
+    void ccso_filter_block_hbd_with_buf_c(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0, const uint8_t *src_cls1,
+    const int src_y_stride, const int dst_stride,
+    const int ccso_stride,
+    const int x, const int y,
+    const int pic_width, const int pic_height,
+    const int8_t *filter_offset, const int blk_size,
+    const int y_uv_hscale,  const int y_uv_vscale,
+    const int max_val, const uint8_t shift_bits,
+    const uint8_t ccso_bo_only);
+    void ccso_filter_block_hbd_with_buf_avx2(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0, const uint8_t *src_cls1,
+    const int src_y_stride, const int dst_stride,
+    const int ccso_stride,
+    const int x, const int y,
+    const int pic_width, const int pic_height,
+    const int8_t *filter_offset, const int blk_size,
+    const int y_uv_hscale,  const int y_uv_vscale,
+    const int max_val, const uint8_t shift_bits,
+    const uint8_t ccso_bo_only);
+    RTCD_EXTERN void (*ccso_filter_block_hbd_with_buf)(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0, const uint8_t *src_cls1,
+    const int src_y_stride, const int dst_stride,
+    const int ccso_stride,
+    const int x, const int y,
+    const int pic_width, const int pic_height,
+    const int8_t *filter_offset, const int blk_size,
+    const int y_uv_hscale,  const int y_uv_vscale,
+    const int max_val, const uint8_t shift_bits,
+    const uint8_t ccso_bo_only);
+
+    void ccso_filter_block_hbd_wo_buf_c(const uint16_t *src_y, uint16_t *dst_yuv, const int x, const int y,
+                                 const int pic_width, const int pic_height, int *src_cls, const int8_t *offset_buf,
+                                 const int src_y_stride, const int dst_stride, const int y_uv_hscale,
+                                 const int y_uv_vscale, const int thr, const int neg_thr, const int *src_loc,
+                                 const int max_val, const int blk_size, const bool isSingleBand,
+                                 const uint8_t shift_bits, const int edge_clf, const uint8_t ccso_bo_only);
+    void ccso_filter_block_hbd_wo_buf_avx2(const uint16_t *src_y, uint16_t *dst_yuv, const int x, const int y,
+                                 const int pic_width, const int pic_height, int *src_cls, const int8_t *offset_buf,
+                                 const int src_y_stride, const int dst_stride, const int y_uv_hscale,
+                                 const int y_uv_vscale, const int thr, const int neg_thr, const int *src_loc,
+                                 const int max_val, const int blk_size, const bool isSingleBand,
+                                 const uint8_t shift_bits, const int edge_clf, const uint8_t ccso_bo_only);
+    RTCD_EXTERN void (*ccso_filter_block_hbd_wo_buf)(const uint16_t *src_y, uint16_t *dst_yuv, const int x, const int y,
+                                 const int pic_width, const int pic_height, int *src_cls, const int8_t *offset_buf,
+                                 const int src_y_stride, const int dst_stride, const int y_uv_hscale,
+                                 const int y_uv_vscale, const int thr, const int neg_thr, const int *src_loc,
+                                 const int max_val, const int blk_size, const bool isSingleBand,
+                                 const uint8_t shift_bits, const int edge_clf, const uint8_t ccso_bo_only);
+
+
     void svt_aom_cdef_find_dir_dual_c(const uint16_t *img1, const uint16_t *img2, int stride, int32_t *var1, int32_t *var2, int32_t coeff_shift, uint8_t *out1, uint8_t *out2);
     void svt_aom_cdef_find_dir_dual_sse4_1(const uint16_t *img1, const uint16_t *img2, int stride, int32_t *var1, int32_t *var2, int32_t coeff_shift, uint8_t *out1, uint8_t *out2);
     void svt_aom_cdef_find_dir_dual_avx2(const uint16_t *img1, const uint16_t *img2, int stride, int32_t *var1, int32_t *var2, int32_t coeff_shift, uint8_t *out1, uint8_t *out2);

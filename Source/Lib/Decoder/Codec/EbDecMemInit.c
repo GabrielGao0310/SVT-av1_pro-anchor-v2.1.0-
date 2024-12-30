@@ -33,7 +33,7 @@
 
 #include "EbDecPicMgr.h"
 #include "EbDecLF.h"
-
+#include "EbDecCcso.h"
 #include "EbUtility.h"
 
 /*TODO: Remove and harmonize with encoder. Globals prevent harmonization now! */

@@ -28,6 +28,7 @@
 #include "EbDecProcessFrame.h"
 #include "EbDecLF.h"
 #include "EbDecCdef.h"
+#include "EbDecCcso.h"
 #include "EbDecRestoration.h"
 
 #include "EbDecBitstream.h"

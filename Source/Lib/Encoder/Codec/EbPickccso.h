@@ -13,6 +13,7 @@
 extern "C" {
 #endif
 
+// void cdef_and_ccso(PictureControlSet  *pcs);
 
 
 void ccso_search(PictureControlSet *pcs, MacroblockdPlane *pd, int rdmult, const uint16_t *ext_rec_y,

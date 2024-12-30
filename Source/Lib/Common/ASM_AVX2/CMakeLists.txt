@@ -50,6 +50,7 @@ set(all_files
     av1_inv_txfm_avx2.c
     av1_inv_txfm_avx2.h
     cdef_block_avx2.c
+    ccso_avx2.c
     cfl_avx2.c
     convolve_2d_avx2.c
     convolve_avx2.c

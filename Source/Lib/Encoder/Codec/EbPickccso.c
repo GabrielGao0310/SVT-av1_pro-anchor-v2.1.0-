@@ -1,12 +1,19 @@
 #include <limits.h>
 #include <float.h>
 
-
+#include "common_dsp_rtcd.h"
 #include "EbPictureControlSet.h"
 #include "EbSequenceControlSet.h"
 #include "EbAv1Structs.h"
 
 #include "EbPickccso.h"
+
+
+
+
+#include "aom_dsp_rtcd.h"
+#include "EbLog.h"
+#include "EbRateDistortionCost.h"
 
 uint8_t final_band_log2;
 int8_t best_filter_offset[CCSO_NUM_COMPONENTS][CCSO_BAND_NUM * 16] = { { 0 } };
@@ -43,56 +50,6 @@ void svt_av1_setup_dst_planes(PictureControlSet *pcs, struct MacroblockdPlane *p
                               const int32_t plane_end);
 
 
-
-void ccso_derive_src_block(const uint16_t *src_y, uint8_t *const src_cls0, uint8_t *const src_cls1,
-                          const int src_y_stride, const int src_cls_stride, const int x, const int y,
-                          const int pic_width, const int pic_height, const int y_uv_hscale, const int y_uv_vscale,
-                          const int qstep, const int neg_qstep, const int *src_loc, const int blk_size,
-                          const int edge_clf) {
-   int       src_cls[2];
-   const int y_end = AOMMIN(pic_height - y, blk_size);
-   const int x_end = AOMMIN(pic_width - x, blk_size);
-   for (int y_start = 0; y_start < y_end; y_start++) {
-       const int y_pos = y_start;
-       for (int x_start = 0; x_start < x_end; x_start++) {
-           const int x_pos = x + x_start;
-           cal_filter_support(src_cls,
-                              &src_y[(y_pos << y_uv_vscale) * src_y_stride + (x_pos << y_uv_hscale)],
-                              qstep,
-                              neg_qstep,
-                              src_loc,
-                              edge_clf);
-           src_cls0[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)] = src_cls[0];
-           src_cls1[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)] = src_cls[1];
-       }
-   }
-}
-
-uint64_t compute_distortion_block(const uint16_t *org, const int org_stride, const uint16_t *rec16,
-                                 const int rec_stride, const int x, const int y, const int log2_filter_unit_size,
-                                 const int height, const int width) {
-   int      err;
-   uint64_t ssd = 0;
-   int      y_offset;
-   int      x_offset;
-   if (y + (1 << log2_filter_unit_size) >= height)
-       y_offset = height - y;
-   else
-       y_offset = (1 << log2_filter_unit_size);
-
-   if (x + (1 << log2_filter_unit_size) >= width)
-       x_offset = width - x;
-   else
-       x_offset = (1 << log2_filter_unit_size);
-
-   for (int y_off = 0; y_off < y_offset; y_off++) {
-       for (int x_off = 0; x_off < x_offset; x_off++) {
-           err = org[org_stride * y_off + x + x_off] - rec16[rec_stride * y_off + x + x_off];
-           ssd += err * err;
-       }
-   }
-   return ssd;
-}
 
 /* Compute SSE */
 static void compute_distortion(const uint16_t *org, const int org_stride, const uint16_t *rec16, const int rec_stride,
@@ -276,38 +233,6 @@ void ccso_compute_class_err(Av1Common *cm, const int plane, MacroblockdPlane *pd
    }
 }
 
-void ccso_filter_block_hbd_with_buf(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0,
-                                   const uint8_t *src_cls1, const int src_y_stride, const int dst_stride,
-                                   const int src_cls_stride, const int x, const int y, const int pic_width,
-                                   const int pic_height, const int8_t *filter_offset, const int blk_size,
-                                   const int y_uv_hscale, const int y_uv_vscale, const int max_val,
-                                   const uint8_t shift_bits, const uint8_t ccso_bo_only) {
-   if (ccso_bo_only) {
-       (void)src_cls0;
-       (void)src_cls1;
-   }
-   int       cur_src_cls0;
-   int       cur_src_cls1;
-   const int y_end = AOMMIN(pic_height - y, blk_size);
-   const int x_end = AOMMIN(pic_width - x, blk_size);
-   for (int y_start = 0; y_start < y_end; y_start++) {
-       const int y_pos = y_start;
-       for (int x_start = 0; x_start < x_end; x_start++) {
-           const int x_pos = x + x_start;
-           if (!ccso_bo_only) {
-               cur_src_cls0 = src_cls0[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)];
-               cur_src_cls1 = src_cls1[(y_pos << y_uv_vscale) * src_cls_stride + (x_pos << y_uv_hscale)];
-           } else {
-               cur_src_cls0 = 0;
-               cur_src_cls1 = 0;
-           }
-           const int band_num    = src_y[(y_pos << y_uv_vscale) * src_y_stride + (x_pos << y_uv_hscale)] >> shift_bits;
-           const int lut_idx_ext = (band_num << 4) + (cur_src_cls0 << 2) + cur_src_cls1;
-           const int offset_val  = filter_offset[lut_idx_ext];
-           dst_yuv[y_pos * dst_stride + x_pos] = clamp(offset_val + dst_yuv[y_pos * dst_stride + x_pos], 0, max_val);
-       }
-   }
-}
 
 /* Apply CCSO on luma component at encoder (high bit-depth) */
 void ccso_try_luma_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
@@ -322,7 +247,7 @@ void ccso_try_luma_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const in
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
            if (ccso_bo_only) {
-               ccso_filter_block_hbd_with_buf(src_y,
+               ccso_filter_block_hbd_with_buf_c(src_y,
                                               dst_yuv,
                                               src_cls0,
                                               src_cls1,
@@ -385,7 +310,7 @@ void ccso_try_chroma_filter(PictureControlSet *pcs, MacroblockdPlane *pd, const 
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
            if (ccso_bo_only) {
-               ccso_filter_block_hbd_with_buf(src_y,
+               ccso_filter_block_hbd_with_buf_c(src_y,
                                               dst_yuv,
                                               src_cls0,
                                               src_cls1,
@@ -888,3 +813,269 @@ void ccso_search(PictureControlSet *pcs, MacroblockdPlane *pd, int rdmult, const
 #endif // CONFIG_D143_CCSO_FM_FLAG
    }
 }
+
+
+// void    svt_av1_cdef_frame(SequenceControlSet *scs, PictureControlSet *pcs);
+// void    finish_cdef_search(PictureControlSet *pcs);
+
+
+
+// void cdef_and_ccso(PictureControlSet  *pcs) {
+//         FrameHeader *frm_hdr;
+//         SequenceControlSet *scs;
+
+//         PictureParentControlSet *ppcs = pcs->ppcs;
+//         scs                           = pcs->scs;
+
+//         Bool       is_16bit      = scs->is_16bit_pipeline;
+//         Av1Common *cm            = pcs->ppcs->av1_cm;
+//         frm_hdr                  = &pcs->ppcs->frm_hdr;
+//         CdefControls *cdef_ctrls = &pcs->ppcs->cdef_ctrls;
+ 
+//             // printf("\nccso\n");
+// #if CCSO
+//         uint8_t* ref_yuv[3] = {NULL, NULL, NULL};
+//         EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic;
+//         const uint32_t       input_offset_y = ref->org_x + ref->org_y * ref->stride_y;
+//         ref_yuv[0]           = ref->buffer_y + (input_offset_y << is_16bit);
+//         const uint32_t input_offset_cb      = (ref->org_x + ref->org_y * ref->stride_cb) >> 1;
+//         ref_yuv[1]           = ref->buffer_cb + (input_offset_cb << is_16bit);
+//         const uint32_t input_offset_cr      = (ref->org_x + ref->org_y * ref->stride_cr) >> 1;
+//         ref_yuv[2]           = ref->buffer_cr + (input_offset_cr << is_16bit);
+
+//         uint16_t *rec_uv[CCSO_NUM_COMPONENTS] = {NULL, NULL, NULL};
+//         uint16_t *org_uv[CCSO_NUM_COMPONENTS] = {NULL, NULL, NULL};
+//         uint16_t *ext_rec_y = NULL;
+//         const int num_planes = av1_num_planes(&scs->seq_header.color_config);
+//         // printf("\nccso begin\n");
+//         EbPictureBufferDesc *recon_pic;
+//         svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
+//         struct MacroblockdPlane pd[3];
+//         pd[0].subsampling_x = 0;
+//         pd[0].subsampling_y = 0;
+//         pd[0].plane_type    = PLANE_TYPE_Y;
+//         pd[0].is_16bit      = recon_pic->bit_depth > 8;
+//         pd[1].subsampling_x = 1;
+//         pd[1].subsampling_y = 1;
+//         pd[1].plane_type    = PLANE_TYPE_UV;
+//         pd[1].is_16bit      = recon_pic->bit_depth > 8;
+//         pd[2].subsampling_x = 1;
+//         pd[2].subsampling_y = 1;
+//         pd[2].plane_type    = PLANE_TYPE_UV;
+//         pd[2].is_16bit      = recon_pic->bit_depth > 8;
+//         if (pcs->ppcs->scs->is_16bit_pipeline)
+//             pd[0].is_16bit = pd[1].is_16bit = pd[2].is_16bit = TRUE;
+//         // /* pointer to current frame */
+//         // Yv12BufferConfig cur_buf;
+//         // svt_aom_link_eb_to_aom_buffer_desc_8bit(pcs->ppcs->enhanced_pic, &cur_buf);
+//         svt_av1_setup_dst_planes( pcs, pd, pcs->ppcs->scs->seq_header.sb_size, recon_pic, 0, 0, 0, num_planes);
+//         const int ccso_stride = pd[0].dst.width;
+//         const int ccso_stride_ext = pd[0].dst.width + (CCSO_PADDING_SIZE << 1);
+
+//         for (int pli = 0; pli < num_planes; pli++) {
+//             if (rec_uv[pli] == NULL) {
+//                 rec_uv[pli] = svt_aom_malloc(sizeof(*rec_uv[pli]) * pd[0].dst.height * ccso_stride);
+//                 // printf("\nmalloc rec_uv[%d]\n", pli);
+//             }
+//             if (org_uv[pli] == NULL) {
+//                 org_uv[pli] = svt_aom_malloc(sizeof(*org_uv[pli]) * pd[0].dst.height * ccso_stride);
+//                 // printf("\nmalloc org_uv[%d]\n", pli);
+//             }
+//         }
+
+//         // double mse1[3] = {0, 0, 0}; //rec和org
+//         // double mse2[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+//         // for (int p = 0; p < 3; p++){
+//         //     for(int i = 0; i < pd[p].dst.height; i++){
+//         //         for (int j = 0; j < pd[p].dst.width; j++) {
+//         //             mse1[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+//         //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+//         //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+//         //             uint8_t* buf = ref_yuv[p];
+//         //             mse2[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+//         //         }
+//         //     }
+//         //     mse1[p] = mse1[p] / (pd[p].dst.height * pd[p].dst.width);
+//         //     mse2[p] = mse2[p] / (pd[p].dst.height * pd[p].dst.width);
+//         // }
+
+//         if (ext_rec_y == NULL) {
+//             ext_rec_y = svt_aom_malloc(sizeof(*ext_rec_y) * (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) * (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
+//             // printf("\nmalloc ext_rec_y\n");
+//         }
+
+//         for (int pli = 0; pli < 1; pli++) {
+//             const int pic_height = pd[pli].dst.height;
+//             const int pic_width = pd[pli].dst.width;
+//             const int dst_stride = pd[pli].dst.stride;
+//             for (int r = 0; r < pic_height; ++r) {
+//                 for (int c = 0; c < pic_width; ++c) {
+//                     if (pli == 0) {
+//                         ext_rec_y[(r + CCSO_PADDING_SIZE) * ccso_stride_ext + c + CCSO_PADDING_SIZE] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+//                     }
+//                 }
+//             }
+//         }
+//         extend_ccso_border(ext_rec_y, CCSO_PADDING_SIZE, pd);
+// #endif
+
+//         pcs->tot_seg_searched_cdef++;
+//         if (pcs->tot_seg_searched_cdef == pcs->cdef_segments_total_count) {
+//             // SVT_LOG("    CDEF all seg here  %i\n", pcs->picture_number);
+//             if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
+//                 finish_cdef_search(pcs);
+//                 if (ppcs->enable_restoration || pcs->ppcs->is_ref || scs->static_config.recon_enabled) {
+//                     // Do application iff there are non-zero filters
+//                     if (frm_hdr->cdef_params.cdef_y_strength[0] != 0 || frm_hdr->cdef_params.cdef_uv_strength[0] != 0 ||
+//                         pcs->ppcs->nb_cdef_strengths != 1) {
+//                         svt_av1_cdef_frame(scs, pcs);
+//                     }
+//                 }
+//             } else {
+//                 frm_hdr->cdef_params.cdef_bits           = 0;
+//                 frm_hdr->cdef_params.cdef_y_strength[0]  = 0;
+//                 pcs->ppcs->nb_cdef_strengths             = 1;
+//                 frm_hdr->cdef_params.cdef_uv_strength[0] = 0;
+//             }
+
+// #if CCSO
+//             svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
+//             svt_av1_setup_dst_planes( pcs, pd, pcs->ppcs->scs->seq_header.sb_size, recon_pic, 0, 0, 0, num_planes);
+
+//             uint16_t ref_stride;
+//             uint16_t *ref_buffer_16bit = NULL;
+//             uint8_t *ref_buffer_8bit = NULL;
+
+//             // Reading original and reconstructed chroma samples as input
+//             for (int pli = 0; pli < num_planes; pli++) {
+//                 const int pic_height = pd[pli].dst.height;
+//                 const int pic_width = pd[pli].dst.width;
+//                 const int dst_stride = pd[pli].dst.stride;
+                
+//                 if (pcs->scs->is_16bit_pipeline) {
+//                     switch (pli) {
+//                         case 0:
+//                             ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+//                             ref_stride = ref->stride_y;
+//                             break;
+//                         case 1:
+//                             ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+//                             ref_stride = ref->stride_cb;
+//                             break;
+//                         case 2:
+//                             ref_buffer_16bit = (uint16_t*)ref_yuv[pli];
+//                             ref_stride = ref->stride_cr;
+//                             break;
+//                         default: ref_stride = 0;
+//                     }
+//                     for (int r = 0; r < pic_height; ++r) {
+//                         for (int c = 0; c < pic_width; ++c) {
+//                             rec_uv[pli][r * ccso_stride + c] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+//                             org_uv[pli][r * ccso_stride + c] = ref_buffer_16bit[r * ref_stride + c];
+//                         }
+//                     }
+//                 } else {
+//                     // 8bit
+//                     switch (pli) {
+//                         case 0:{
+//                             ref_buffer_8bit = ref_yuv[pli];
+//                             ref_stride = ref->stride_y;
+//                             break;
+//                         }
+
+//                         case 1:{
+//                             ref_buffer_8bit = ref_yuv[pli];
+//                             ref_stride = ref->stride_cb;
+//                             break;
+//                         }
+
+//                         case 2:{
+//                             ref_buffer_8bit = ref_yuv[pli];
+//                             ref_stride = ref->stride_cr;
+//                             break;
+//                         }
+
+//                         default: ref_stride = 0;
+//                     }
+//                     for (int r = 0; r < pic_height; ++r) {
+//                         for (int c = 0; c < pic_width; ++c) {
+//                             rec_uv[pli][r * ccso_stride + c] = (uint16_t)pd[pli].dst.buf[r * dst_stride + c];
+//                             org_uv[pli][r * ccso_stride + c] = (uint16_t)ref_buffer_8bit[r * ref_stride + c];
+//                         }
+//                     }
+//                 }
+//             }
+
+//             uint64_t   lambda;
+//             uint32_t   fast_lambda, full_lambda = 0;
+//             (*svt_aom_av1_lambda_assignment_function_table[pcs->ppcs->pred_structure])(
+//                 pcs,
+//                 &fast_lambda,
+//                 &full_lambda,
+//                 (uint8_t)pcs->ppcs->enhanced_pic->bit_depth,
+//                 pcs->ppcs->frm_hdr.quantization_params.base_q_idx,
+//                 FALSE);
+//             lambda   = full_lambda;
+
+//             // // 算一下rec和org的sse，好像不大对劲
+//             // double mse3[3] = {0, 0, 0}; //rec和org
+//             // double mse4[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+//             // for (int p = 0; p < 3; p++){
+//             //     for(int i = 0; i < pd[p].dst.height; i++){
+//             //         for (int j = 0; j < pd[p].dst.width; j++) {
+//             //             mse3[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+//             //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+//             //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+//             //             uint8_t* buf = ref_yuv[p];
+//             //             mse4[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+//             //         }
+//             //     }
+//             //     mse3[p] = mse3[p] / (pd[p].dst.height * pd[p].dst.width);
+//             //     mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
+//             // }
+
+
+
+//             ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
+//             ccso_frame(recon_pic, pcs, pd, ext_rec_y);
+
+
+//             // // 算一下rec和org的sse，好像不大对劲
+//             // double mse5[3] = {0, 0, 0}; //rec和org
+//             // double mse6[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
+//             // for (int p = 0; p < 3; p++){
+//             //     for(int i = 0; i < pd[p].dst.height; i++){
+//             //         for (int j = 0; j < pd[p].dst.width; j++) {
+//             //             mse5[p] += (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]) * (rec_uv[p][i * ccso_stride + j] - org_uv[p][i * ccso_stride + j]);
+//             //             int std = p==0 ? ref->stride_y : ref->stride_cb;
+//             //             // uint8_t* buf = p==0 ? ref->buffer_y : (p==1 ? ref->buffer_cb : ref->buffer_cr);
+//             //             uint8_t* buf = ref_yuv[p];
+//             //             mse6[p] += (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]) * (pd[p].dst.buf[i * pd[p].dst.stride + j] - buf[i * (std) + j]);
+//             //         }
+//             //     }
+//             //     mse5[p] = mse5[p] / (pd[p].dst.height * pd[p].dst.width);
+//             //     mse6[p] = mse6[p] / (pd[p].dst.height * pd[p].dst.width);
+//             // }
+            
+//             if (ext_rec_y != NULL) {
+//                 svt_aom_free(ext_rec_y);
+//                 // printf("\nfree ext_rec_y\n");
+//                 ext_rec_y = NULL;
+//             }
+            
+//             for (int pli = 0; pli < num_planes; pli++) {
+//                 if (rec_uv[pli] != NULL) {
+//                     svt_aom_free(rec_uv[pli]);
+//                     // printf("\nfree rec_uv[%d]\n", pli);
+//                     rec_uv[pli] = NULL;  // 防止重复释放
+//                 }
+//                 if (org_uv[pli] != NULL) {
+//                     svt_aom_free(org_uv[pli]);
+//                     // printf("\nfree org_uv[%d]\n", pli);
+//                     org_uv[pli] = NULL;  // 防止重复释放
+//                 }
+//             }      
+// #endif
+
+//         }
+// }

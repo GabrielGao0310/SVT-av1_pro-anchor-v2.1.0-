@@ -14,6 +14,8 @@
 
 #include "EbDefinitions.h"
 
+#ifndef SEQ_LEVEL_ENUM_H
+#define SEQ_LEVEL_ENUM_H
 enum {
     SEQ_LEVEL_2_0,
     SEQ_LEVEL_2_1,
@@ -42,6 +44,7 @@ enum {
     SEQ_LEVELS,
     SEQ_LEVEL_MAX = 31
 } UENUM1BYTE(AV1_LEVEL);
+#endif
 
 typedef BitstreamProfile BITSTREAM_PROFILE;
 

@@ -45,6 +45,9 @@
 #define SELECT_INTEGER_MV 2
 #define NUM_REF_FRAMES 8
 
+
+#ifndef SEQ_LEVEL_ENUM_H
+#define SEQ_LEVEL_ENUM_H
 enum {
     SEQ_LEVEL_2_0,
     SEQ_LEVEL_2_1,
@@ -73,6 +76,7 @@ enum {
     SEQ_LEVELS,
     SEQ_LEVEL_MAX = 31
 } UENUM1BYTE(AV1_LEVEL);
+#endif
 
 int         svt_aom_get_qindex(SegmentationParams *seg_params, int segment_id, int base_q_idx);
 void        svt_setup_motion_field(EbDecHandle *dec_handle, DecThreadCtxt *thread_ctxt);

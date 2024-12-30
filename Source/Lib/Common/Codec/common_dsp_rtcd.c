@@ -633,6 +633,10 @@ void svt_aom_setup_common_rtcd_internal(EbCpuFlags flags) {
 #endif
     SET_SSE41_AVX2(svt_aom_copy_rect8_8bit_to_16bit, svt_aom_copy_rect8_8bit_to_16bit_c, svt_aom_copy_rect8_8bit_to_16bit_sse4_1, svt_aom_copy_rect8_8bit_to_16bit_avx2);
     SET_SSE41_AVX2(svt_av1_highbd_warp_affine, svt_av1_highbd_warp_affine_c, svt_av1_highbd_warp_affine_sse4_1, svt_av1_highbd_warp_affine_avx2);
+    SET_AVX2(compute_distortion_block, compute_distortion_block_c, compute_distortion_block_avx2);
+    SET_AVX2(ccso_filter_block_hbd_wo_buf, ccso_filter_block_hbd_wo_buf_c, ccso_filter_block_hbd_wo_buf_avx2);
+    SET_AVX2(ccso_filter_block_hbd_with_buf, ccso_filter_block_hbd_with_buf_c, ccso_filter_block_hbd_with_buf_avx2);
+    SET_AVX2(ccso_derive_src_block, ccso_derive_src_block_c, ccso_derive_src_block_avx2);
     SET_AVX2(dec_svt_av1_highbd_warp_affine, svt_aom_dec_svt_av1_highbd_warp_affine_c, svt_aom_dec_svt_av1_highbd_warp_affine_avx2);
     SET_SSE41_AVX2(svt_av1_warp_affine, svt_av1_warp_affine_c, svt_av1_warp_affine_sse4_1, svt_av1_warp_affine_avx2);
 
@@ -1161,6 +1165,10 @@ void svt_aom_setup_common_rtcd_internal(EbCpuFlags flags) {
     SET_NEON(svt_cdef_filter_block, svt_cdef_filter_block_c, svt_cdef_filter_block_neon);
 
     SET_ONLY_C(svt_aom_copy_rect8_8bit_to_16bit, svt_aom_copy_rect8_8bit_to_16bit_c);
+    SET_ONLY_C(compute_distortion_block, compute_distortion_block_c);
+    SET_ONLY_C(ccso_filter_block_hbd_wo_buf, ccso_filter_block_hbd_wo_buf_c);
+    SET_ONLY_C(ccso_filter_block_hbd_with_buf, ccso_filter_block_hbd_with_buf_c);
+    SET_ONLY_C(ccso_derive_src_block, ccso_derive_src_block_c);
     SET_ONLY_C(svt_av1_highbd_warp_affine, svt_av1_highbd_warp_affine_c);
     SET_ONLY_C(dec_svt_av1_highbd_warp_affine, svt_aom_dec_svt_av1_highbd_warp_affine_c);
     SET_NEON(svt_av1_warp_affine, svt_av1_warp_affine_c, svt_av1_warp_affine_neon);
@@ -1686,6 +1694,10 @@ void svt_aom_setup_common_rtcd_internal(EbCpuFlags flags) {
     SET_ONLY_C(svt_aom_cdef_find_dir_dual, svt_aom_cdef_find_dir_dual_c);
     SET_ONLY_C(svt_cdef_filter_block, svt_cdef_filter_block_c);
     SET_ONLY_C(svt_aom_copy_rect8_8bit_to_16bit, svt_aom_copy_rect8_8bit_to_16bit_c);
+    SET_ONLY_C(compute_distortion_block, compute_distortion_block_c);
+    SET_ONLY_C(ccso_filter_block_hbd_wo_buf, ccso_filter_block_hbd_wo_buf_c);
+    SET_ONLY_C(ccso_filter_block_hbd_with_buf, ccso_filter_block_hbd_with_buf_c);
+    SET_ONLY_C(ccso_derive_src_block, ccso_derive_src_block_c);
     SET_ONLY_C(svt_av1_highbd_warp_affine, svt_av1_highbd_warp_affine_c);
     SET_ONLY_C(dec_svt_av1_highbd_warp_affine, svt_aom_dec_svt_av1_highbd_warp_affine_c);
     SET_ONLY_C(svt_av1_warp_affine, svt_av1_warp_affine_c);
