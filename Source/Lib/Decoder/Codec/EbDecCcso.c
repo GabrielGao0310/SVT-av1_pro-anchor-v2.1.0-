@@ -9,571 +9,421 @@
 #include "EbUtility.h"
 #include "EbDecCcso.h"
 
-// /*Compute's whether 8x8 block is skip or not skip block*/
-// static INLINE int32_t dec_is_8x8_block_skip(BlockModeInfo *mbmi) {
-//     int32_t is_skip = mbmi->skip;
-//     /* To get mode info for special cases wx4, 4xh & 4x4 blocksize */
-//     /* Skip is set to(Skips[r][c] && Skips[r + 1][c] && Skips[r][c + 1] &&
-//        Skips[r + 1][c + 1]) as per the Spec sec. 7.15.1 */
-//     if (BLOCK_4X4 == mbmi->bsize)
-//         is_skip = mbmi[0].skip && mbmi[1].skip && mbmi[2].skip && mbmi[3].skip;
-//     else if (1 == mi_size_wide[mbmi->bsize] || 1 == mi_size_high[mbmi->bsize]) {
-//         is_skip = mbmi[0].skip && mbmi[1].skip;
-//     }
-//     return is_skip;
-// }
 
-// /*Compute's no. of cdef blocks in units of 8x8 manner in a 64x64 block */
-// static INLINE int32_t dec_sb_compute_cdef_list(EbDecHandle *dec_handle, SBInfo *sb_info, FrameHeader *frame_info,
-//                                                int32_t mi_row, int32_t mi_col, CdefList *dlist, BlockSize bs) {
-//     int32_t maxc = frame_info->mi_cols - mi_col;
-//     int32_t maxr = frame_info->mi_rows - mi_row;
+/* Pad the border of a frame */
+void dec_extend_ccso_border(uint16_t *buf, const int d, EbPictureBufferDesc* curbuf) {
+    int       s = curbuf->width + (CCSO_PADDING_SIZE << 1);
+    uint16_t *p = &buf[d * s + d];
+    int       h = curbuf->height;
+    int       w = curbuf->width;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < d; x++) {
+            *(p - d + x) = p[0];
+            p[w + x]     = p[w - 1];
+        }
+        p += s;
+    }
+    p -= (s + d);
+    for (int y = 0; y < d; y++) { memcpy(p + (y + 1) * s, p, sizeof(uint16_t) * (w + (d << 1))); }
+    p -= ((h - 1) * s);
+    for (int y = 0; y < d; y++) { memcpy(p - (y + 1) * s, p, sizeof(uint16_t) * (w + (d << 1))); }
+}
 
-//     if (bs == BLOCK_128X128 || bs == BLOCK_128X64)
-//         maxc = AOMMIN(maxc, MI_SIZE_128X128);
-//     else
-//         maxc = AOMMIN(maxc, MI_SIZE_64X64);
-//     if (bs == BLOCK_128X128 || bs == BLOCK_64X128)
-//         maxr = AOMMIN(maxr, MI_SIZE_128X128);
-//     else
-//         maxr = AOMMIN(maxr, MI_SIZE_64X64);
 
-//     const int32_t r_step  = mi_size_high[BLOCK_8X8];
-//     const int32_t c_step  = mi_size_wide[BLOCK_8X8];
-//     const int32_t r_shift = (r_step == 2);
-//     const int32_t c_shift = (c_step == 2);
 
-//     assert(r_step == 1 || r_step == 2);
-//     assert(c_step == 1 || c_step == 2);
 
-//     int32_t count = 0;
-//     for (int32_t r = 0; r < maxr; r += r_step) {
-//         for (int32_t c = 0; c < maxc; c += c_step) {
-//             BlockModeInfo *mbmi = svt_aom_get_cur_mode_info(dec_handle, (mi_row + r), (mi_col + c), sb_info);
-//             if (!dec_is_8x8_block_skip(mbmi)) {
-//                 dlist[count].by = (uint8_t)(r >> r_shift);
-//                 dlist[count].bx = (uint8_t)(c >> c_shift);
-//                 count++;
-//             }
-//         }
-//     }
-//     return count;
-// }
+/* Apply CCSO on luma component when multiple bands are applied */
+void dec_ccso_apply_luma_mb_filter(EbDecHandle * dec_handle, const int plane, const uint16_t *src_y,
+                              uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                              const uint8_t max_band_log2, const int edge_clf) {
+   //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+    FrameHeader  *frm_hdr = &dec_handle->frame_header;
+    EbPictureBufferDesc *frame = dec_handle->cur_pic_buf[0]->ps_pic_buf;
+    MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
+    CurFrameBuf         *frame_buf      = &main_frame_buf->cur_frame_bufs[0];
 
-// void svt_cdef_block(EbDecHandle *dec_handle, int32_t *mi_wide_l2, int32_t *mi_high_l2, uint16_t **colbuf,
-//                     uint8_t *prev_row_cdef, uint8_t *curr_row_cdef, int32_t fbr, int32_t fbc, uint32_t *cdef_left,
-//                     int32_t num_planes, uint16_t *src, int32_t *curr_recon_stride, uint8_t **curr_blk_recon_buf,
-//                     uint16_t **linebuf_above, uint16_t **linebuf_curr, int32_t stride) {
-//     MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
-//     CurFrameBuf         *frame_buf      = &main_frame_buf->cur_frame_bufs[0];
-//     EbPictureBufferDesc *recon_pic      = dec_handle->cur_pic_buf[0]->ps_pic_buf;
+   //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+    const int     ccso_ext_stride = frame->width + (CCSO_PADDING_SIZE << 1);
+    const int     y_uv_hscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
+    const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
+    const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
+    const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
+    const uint8_t shift_bits      = frame->bit_depth;
+    const int     max_val         = (1 << frame->bit_depth) - 1;
+   int           src_cls[2];
+   const int     neg_thr = thr * -1;
+   int           src_loc[2];
+   derive_ccso_sample_pos(src_loc, ccso_ext_stride, filter_sup);
+   const int blk_log2 = plane > 0 ? CCSO_BLK_SIZE : CCSO_BLK_SIZE + 1;
+   const int blk_size = 1 << blk_log2;
+   src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
+   for (int y = 0; y < pic_height; y += blk_size) {
+       for (int x = 0; x < pic_width; x += blk_size) {
+           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
-//     int8_t use_highbd = (dec_handle->seq_header.color_config.bit_depth > EB_EIGHT_BIT || dec_handle->is_16bit_pipeline);
-//     const int32_t cdef_mask = 1;
-//     uint32_t      cdef_count;
-//     int32_t       coeff_shift = AOMMAX(recon_pic->bit_depth - 8, 0);
-//     FrameHeader  *frame_info  = &dec_handle->frame_header;
-//     /*const int32_t stride = (frame_info->mi_cols << MI_SIZE_LOG2) +
-//         2 * CDEF_HBORDER;*/
-//     const int32_t nvfb = (frame_info->mi_rows + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     const int32_t nhfb = (frame_info->mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     CdefList      dlist[MI_SIZE_64X64 * MI_SIZE_64X64];
-//     uint8_t       dir[CDEF_NBLOCKS][CDEF_NBLOCKS] = {{0}};
-//     int32_t       var[CDEF_NBLOCKS][CDEF_NBLOCKS] = {{0}};
-//     /* Logic for getting SBinfo,
-//     SbInfo points to every super block.*/
-//     SBInfo *sb_info = NULL;
-//     if (dec_handle->seq_header.sb_size == BLOCK_128X128) {
-//         sb_info = frame_buf->sb_info + ((fbr >> 1) * main_frame_buf->sb_cols) + (fbc >> 1);
-//     } else {
-//         sb_info = frame_buf->sb_info + ((fbr)*main_frame_buf->sb_cols) + (fbc);
-//     }
+            SBInfo *sb_info = NULL;
+            sb_info = frame_buf->sb_info + ccso_blk_idx;
+           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
+           if (!use_ccso)
+               continue;
+           if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
+               ccso_filter_block_hbd_wo_buf_c(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            0,
+                                            0,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            false,
+                                            shift_bits,
+                                            edge_clf,
+                                            frm_hdr->ccso_info.ccso_bo_only[plane]);
+           } else {
+               ccso_filter_block_hbd_wo_buf(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            0,
+                                            0,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            false,
+                                            shift_bits,
+                                            edge_clf,
+                                            0);
+           }
+       }
+       dst_yuv += (dst_stride << blk_log2);
+       src_y += (ccso_ext_stride << blk_log2);
+   }
+}
 
-//     /*Logic for consuming cdef values from super block,
-//     Index will vary from 0 to 3 based on position of 64x64 block
-//     in Superblock.*/
-//     const int32_t index = dec_handle->seq_header.sb_size == BLOCK_128X128
-//         ? (!!(fbc & cdef_mask) + 2 * !!(fbr & cdef_mask))
-//         : 0;
+/* Apply CCSO on luma component when single band is applied */
+void dec_ccso_apply_luma_sb_filter(EbDecHandle * dec_handle, const int plane, const uint16_t *src_y,
+                              uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                              const uint8_t max_band_log2, const int edge_clf) {
+   (void)max_band_log2;
+    FrameHeader  *frm_hdr = &dec_handle->frame_header;
+    EbPictureBufferDesc *frame = dec_handle->cur_pic_buf[0]->ps_pic_buf;
+    MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
+    CurFrameBuf         *frame_buf      = &main_frame_buf->cur_frame_bufs[0];
 
-//     int32_t level, sec_strength;
-//     int32_t uv_level, uv_sec_strength;
-//     int32_t nhb, nvb;
-//     int32_t cstart     = 0;
-//     curr_row_cdef[fbc] = 0;
-//     if (sb_info == NULL || sb_info->sb_cdef_strength[index] == -1) {
-//         *cdef_left = 0;
-//         return;
-//     }
-//     if (!*cdef_left)
-//         cstart = -CDEF_HBORDER;
-//     nhb = AOMMIN(MI_SIZE_64X64, frame_info->mi_cols - MI_SIZE_64X64 * fbc);
-//     nvb = AOMMIN(MI_SIZE_64X64, frame_info->mi_rows - MI_SIZE_64X64 * fbr);
-//     int32_t frame_top, frame_left, frame_bottom, frame_right;
-//     int32_t row_ofset = MI_SIZE_64X64 * fbr;
-//     int32_t col_ofset = MI_SIZE_64X64 * fbc;
+   //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+    const int     ccso_ext_stride = frame->width + (CCSO_PADDING_SIZE << 1);
+    const int     y_uv_hscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
+    const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
+    const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
+    const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
+    const uint8_t shift_bits      = frame->bit_depth;
+    const int     max_val         = (1 << frame->bit_depth) - 1;
 
-//     /*For the current filter block, it's top left corner mi structure (mi_tl)
-//     is first accessed to check whether the top and left boundaries are
-//     frame boundaries. Then bottom-left and top-right mi structures are
-//     accessed to check whether the bottom and right boundaries
-//     (respectively) are frame boundaries.
+   int           src_cls[2];
+   const int     neg_thr = thr * -1;
+   int           src_loc[2];
+   derive_ccso_sample_pos(src_loc, ccso_ext_stride, filter_sup);
+   const int blk_log2 = plane > 0 ? CCSO_BLK_SIZE : CCSO_BLK_SIZE + 1;
+   const int blk_size = 1 << blk_log2;
+   src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
+   for (int y = 0; y < pic_height; y += blk_size) {
+       for (int x = 0; x < pic_width; x += blk_size) {
+           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
-//     Note that we can't just check the bottom-right mi structure - eg. if
-//     we're at the right-hand edge of the frame but not the bottom, then
-//     the bottom-right mi is NULL but the bottom-left is not.  */
+            SBInfo *sb_info = NULL;
+            sb_info = frame_buf->sb_info + ccso_blk_idx;
+           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
 
-//     frame_top  = (row_ofset == 0) ? 1 : 0;
-//     frame_left = (col_ofset == 0) ? 1 : 0;
+           if (!use_ccso)
+               continue;
+           if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
+               ccso_filter_block_hbd_wo_buf_c(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            0,
+                                            0,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            true,
+                                            shift_bits,
+                                            edge_clf,
+                                            frm_hdr->ccso_info.ccso_bo_only[plane]);
+           } else {
+               ccso_filter_block_hbd_wo_buf(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            0,
+                                            0,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            true,
+                                            shift_bits,
+                                            edge_clf,
+                                            0);
+           }
+       }
+       dst_yuv += (dst_stride << blk_log2);
+       src_y += (ccso_ext_stride << blk_log2);
+   }
+}
 
-//     if (fbr != nvfb - 1) {
-//         frame_bottom = ((uint32_t)row_ofset + MI_SIZE_64X64 == frame_info->mi_rows) ? 1 : 0;
-//     } else
-//         frame_bottom = 1;
+/* Apply CCSO on chroma component when multiple bands are applied */
+void dec_ccso_apply_chroma_mb_filter(EbDecHandle * dec_handle, const int plane, const uint16_t *src_y,
+                                uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                                const uint8_t max_band_log2, const int edge_clf) {
+    FrameHeader  *frm_hdr = &dec_handle->frame_header;
+    EbPictureBufferDesc *frame = dec_handle->cur_pic_buf[0]->ps_pic_buf;
+    MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
+    CurFrameBuf         *frame_buf      = &main_frame_buf->cur_frame_bufs[0];
 
-//     if (fbc != nhfb - 1) {
-//         frame_right = ((uint32_t)col_ofset + MI_SIZE_64X64 == frame_info->mi_cols) ? 1 : 0;
-//     } else
-//         frame_right = 1;
+   //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+    const int     ccso_ext_stride = frame->width + (CCSO_PADDING_SIZE << 1);
+    const int     y_uv_hscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
+    const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
+    const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
+    const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
+    const uint8_t shift_bits      = frame->bit_depth;
+    const int     max_val         = (1 << frame->bit_depth) - 1;
 
-//     const int32_t cdef_strength = sb_info->sb_cdef_strength[index];
-//     level                       = frame_info->cdef_params.cdef_y_strength[cdef_strength] / CDEF_SEC_STRENGTHS;
-//     sec_strength                = frame_info->cdef_params.cdef_y_strength[cdef_strength] % CDEF_SEC_STRENGTHS;
-//     sec_strength += sec_strength == 3;
-//     uv_level        = frame_info->cdef_params.cdef_uv_strength[cdef_strength] / CDEF_SEC_STRENGTHS;
-//     uv_sec_strength = frame_info->cdef_params.cdef_uv_strength[cdef_strength] % CDEF_SEC_STRENGTHS;
-//     uv_sec_strength += uv_sec_strength == 3;
+   int           src_cls[2];
+   const int     neg_thr = thr * -1;
+   int           src_loc[2];
+   derive_ccso_sample_pos(src_loc, ccso_ext_stride, filter_sup);
+   const int blk_log2 = plane > 0 ? CCSO_BLK_SIZE : CCSO_BLK_SIZE + 1;
+   const int blk_size = 1 << blk_log2;
+   src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
+   for (int y = 0; y < pic_height; y += blk_size) {
+       for (int x = 0; x < pic_width; x += blk_size) {
+           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
-//     if ((level == 0 && sec_strength == 0 && uv_level == 0 && uv_sec_strength == 0) ||
-//         (cdef_count = dec_sb_compute_cdef_list(
-//              dec_handle, sb_info, frame_info, (fbr * MI_SIZE_64X64), (fbc * MI_SIZE_64X64), dlist, BLOCK_64X64)) == 0) {
-//         *cdef_left = 0;
-//         return;
-//     }
-//     curr_row_cdef[fbc] = 1;
-//     /*Cdef loop for each plane*/
-//     for (int32_t pli = 0; pli < num_planes; pli++) {
-//         uint32_t coffset;
-//         int32_t  rend, cend;
-//         int32_t  pri_damping = frame_info->cdef_params.cdef_damping;
-//         int32_t  sec_damping = pri_damping;
-//         int32_t  hsize       = nhb << mi_wide_l2[pli];
-//         int32_t  vsize       = nvb << mi_high_l2[pli];
-//         int32_t  sub_x       = (pli == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
-//         int32_t  sub_y       = (pli == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
-//         if (pli) {
-//             level        = uv_level;
-//             sec_strength = uv_sec_strength;
-//         }
+            SBInfo *sb_info = NULL;
+            sb_info = frame_buf->sb_info + ccso_blk_idx;
+           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
+           if (!use_ccso)
+               continue;
+           if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
+               ccso_filter_block_hbd_wo_buf_c(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            y_uv_hscale,
+                                            y_uv_vscale,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            false,
+                                            shift_bits,
+                                            edge_clf,
+                                            frm_hdr->ccso_info.ccso_bo_only[plane]);
+           } else {
+               ccso_filter_block_hbd_wo_buf(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            y_uv_hscale,
+                                            y_uv_vscale,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            false,
+                                            shift_bits,
+                                            edge_clf,
+                                            0);
+           }
+       }
+       dst_yuv += (dst_stride << blk_log2);
+       src_y += (ccso_ext_stride << (blk_log2 + y_uv_vscale));
+   }
+}
 
-//         if (fbc == nhfb - 1)
-//             cend = hsize;
-//         else
-//             cend = hsize + CDEF_HBORDER;
 
-//         if (fbr == nvfb - 1)
-//             rend = vsize;
-//         else
-//             rend = vsize + CDEF_VBORDER;
 
-//         coffset = fbc * MI_SIZE_64X64 << mi_wide_l2[pli];
-//         if (fbc == nhfb - 1) {
-//             /* On the last superblock column, fill in the right border with
-//                CDEF_VERY_LARGE to avoid filtering with the outside. */
-//             svt_aom_fill_rect(&src[cend + CDEF_HBORDER],
-//                               CDEF_BSTRIDE,
-//                               rend + CDEF_VBORDER,
-//                               hsize + CDEF_HBORDER - cend,
-//                               CDEF_VERY_LARGE);
-//         }
-//         if (fbr == nvfb - 1) {
-//             /* On the last superblock row, fill in the bottom border with
-//                CDEF_VERY_LARGE to avoid filtering with the outside. */
-//             svt_aom_fill_rect(&src[(rend + CDEF_VBORDER) * CDEF_BSTRIDE],
-//                               CDEF_BSTRIDE,
-//                               CDEF_VBORDER,
-//                               hsize + 2 * CDEF_HBORDER,
-//                               CDEF_VERY_LARGE);
-//         }
-//         uint8_t *rec_buff   = 0;
-//         uint32_t rec_stride = 0;
-//         switch (pli) {
-//         case 0:
-//             rec_buff   = curr_blk_recon_buf[0];
-//             rec_stride = curr_recon_stride[0];
-//             break;
-//         case 1:
-//             rec_buff   = curr_blk_recon_buf[1];
-//             rec_stride = curr_recon_stride[1];
-//             break;
-//         case 2:
-//             rec_buff   = curr_blk_recon_buf[2];
-//             rec_stride = curr_recon_stride[2];
-//             break;
-//         }
-//         /* Copy in the pixels we need from the current superblock for
-//            deringing.*/
-//         svt_aom_copy_sb8_16(&src[CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER + cstart],
-//                             CDEF_BSTRIDE,
-//                             rec_buff /*xd->plane[pli].dst.buf*/,
-//                             (MI_SIZE_64X64 << mi_high_l2[pli]) * fbr,
-//                             coffset + cstart,
-//                             rec_stride /*xd->plane[pli].dst.stride*/,
-//                             rend,
-//                             cend - cstart,
-//                             use_highbd);
 
-//         if (!prev_row_cdef[fbc]) {
-//             svt_aom_copy_sb8_16( //cm,
-//                 &src[CDEF_HBORDER],
-//                 CDEF_BSTRIDE,
-//                 rec_buff /*xd->plane[pli].dst.buf*/,
-//                 (MI_SIZE_64X64 << mi_high_l2[pli]) * fbr - CDEF_VBORDER,
-//                 coffset,
-//                 rec_stride /*xd->plane[pli].dst.stride*/,
-//                 CDEF_VBORDER,
-//                 hsize,
-//                 use_highbd);
-//         } else if (fbr > 0) {
-//             svt_aom_copy_rect(
-//                 &src[CDEF_HBORDER], CDEF_BSTRIDE, &linebuf_above[pli][coffset], stride, CDEF_VBORDER, hsize);
-//         } else {
-//             svt_aom_fill_rect(&src[CDEF_HBORDER], CDEF_BSTRIDE, CDEF_VBORDER, hsize, CDEF_VERY_LARGE);
-//         }
+/* Apply CCSO on chroma component when single bands is applied */
+void dec_ccso_apply_chroma_sb_filter(EbDecHandle * dec_handle, const int plane, const uint16_t *src_y,
+                                uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
+                                const uint8_t max_band_log2, const int edge_clf) {
+    (void)max_band_log2;
+    FrameHeader  *frm_hdr = &dec_handle->frame_header;
+    EbPictureBufferDesc *frame = dec_handle->cur_pic_buf[0]->ps_pic_buf;
+    MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
+    CurFrameBuf         *frame_buf      = &main_frame_buf->cur_frame_bufs[0];
+    //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+    const int     ccso_ext_stride = frame->width + (CCSO_PADDING_SIZE << 1);
+    const int     y_uv_hscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
+    const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
+    const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
+    const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
+    const uint8_t shift_bits      = frame->bit_depth;
 
-//         if (!prev_row_cdef[fbc - 1]) {
-//             svt_aom_copy_sb8_16( //cm,
-//                 src,
-//                 CDEF_BSTRIDE,
-//                 rec_buff /*xd->plane[pli].dst.buf*/,
-//                 (MI_SIZE_64X64 << mi_high_l2[pli]) * fbr - CDEF_VBORDER,
-//                 coffset - CDEF_HBORDER,
-//                 rec_stride /*xd->plane[pli].
-//                 dst.stride*/
-//                 ,
-//                 CDEF_VBORDER,
-//                 CDEF_HBORDER,
-//                 use_highbd);
-//         } else if (fbr > 0 && fbc > 0) {
-//             svt_aom_copy_rect(
-//                 src, CDEF_BSTRIDE, &linebuf_above[pli][coffset - CDEF_HBORDER], stride, CDEF_VBORDER, CDEF_HBORDER);
-//         } else {
-//             svt_aom_fill_rect(src, CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
+    const int     max_val         = (1 << frame->bit_depth) - 1;
+    int           src_cls[2];
+    const int     neg_thr = thr * -1;
+    int           src_loc[2];
+    derive_ccso_sample_pos(src_loc, ccso_ext_stride, filter_sup);
+    const int blk_log2 = plane > 0 ? CCSO_BLK_SIZE : CCSO_BLK_SIZE + 1;
+    const int blk_size = 1 << blk_log2;
+    src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
+   for (int y = 0; y < pic_height; y += blk_size) {
+       for (int x = 0; x < pic_width; x += blk_size) {
+           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+            SBInfo *sb_info = NULL;
+            sb_info = frame_buf->sb_info + ccso_blk_idx;
+           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
 
-//         if (!prev_row_cdef[fbc + 1]) {
-//             svt_aom_copy_sb8_16( //cm,
-//                 &src[CDEF_HBORDER + (nhb << mi_wide_l2[pli])],
-//                 CDEF_BSTRIDE,
-//                 rec_buff /*xd->plane[pli].dst.buf*/,
-//                 (MI_SIZE_64X64 << mi_high_l2[pli]) * fbr - CDEF_VBORDER,
-//                 coffset + hsize,
-//                 rec_stride /*xd->plane[pli].dst.stride*/,
-//                 CDEF_VBORDER,
-//                 CDEF_HBORDER,
-//                 use_highbd);
-//         } else if (fbr > 0 && fbc < nhfb - 1) {
-//             svt_aom_copy_rect(&src[hsize + CDEF_HBORDER],
-//                               CDEF_BSTRIDE,
-//                               &linebuf_above[pli][coffset + hsize],
-//                               stride,
-//                               CDEF_VBORDER,
-//                               CDEF_HBORDER);
-//         } else {
-//             svt_aom_fill_rect(&src[hsize + CDEF_HBORDER], CDEF_BSTRIDE, CDEF_VBORDER, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
 
-//         if (*cdef_left) {
-//             /* If we deringed the superblock on the left
-//                then we need to copy in saved pixels. */
-//             svt_aom_copy_rect(src, CDEF_BSTRIDE, colbuf[pli], CDEF_HBORDER, rend + CDEF_VBORDER, CDEF_HBORDER);
-//         }
+           if (!use_ccso)
+               continue;
+           if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
+               ccso_filter_block_hbd_wo_buf_c(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            y_uv_hscale,
+                                            y_uv_vscale,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            true,
+                                            shift_bits,
+                                            edge_clf,
+                                            frm_hdr->ccso_info.ccso_bo_only[plane]);
+           } else {
+               ccso_filter_block_hbd_wo_buf(src_y,
+                                            dst_yuv,
+                                            x,
+                                            y,
+                                            pic_width,
+                                            pic_height,
+                                            src_cls,
+                                            frm_hdr->ccso_info.filter_offset[plane],
+                                            ccso_ext_stride,
+                                            dst_stride,
+                                            y_uv_hscale,
+                                            y_uv_vscale,
+                                            thr,
+                                            neg_thr,
+                                            src_loc,
+                                            max_val,
+                                            blk_size,
+                                            true,
+                                            shift_bits,
+                                            edge_clf,
+                                            0);
+           }
+       }
+       dst_yuv += (dst_stride << blk_log2);
+       src_y += (ccso_ext_stride << (blk_log2 + y_uv_vscale));
+   }
+}
 
-//         /* Saving pixels in case we need to dering the superblock
-//             on the right. */
-//         if (fbc < nhfb - 1)
-//             svt_aom_copy_rect(colbuf[pli], CDEF_HBORDER, src + hsize, CDEF_BSTRIDE, rend + CDEF_VBORDER, CDEF_HBORDER);
 
-//         if (fbr < nvfb - 1) {
-//             svt_aom_copy_sb8_16(&linebuf_curr[pli][coffset],
-//                                 stride,
-//                                 rec_buff,
-//                                 (MI_SIZE_64X64 << mi_high_l2[pli]) * (fbr + 1) - CDEF_VBORDER,
-//                                 coffset,
-//                                 rec_stride,
-//                                 CDEF_VBORDER,
-//                                 hsize,
-//                                 use_highbd);
-//         }
+/* Apply CCSO for one frame */
+// EbPictureBufferDesc *recon_pic
+void dec_ccso_frame(EbPictureBufferDesc *frame, EbDecHandle * dec_handle, uint16_t *ext_rec_y) {
+    FrameHeader  *frm_hdr = &dec_handle->frame_header;
+    const int32_t num_planes = av1_num_planes(&dec_handle->seq_header.color_config);
 
-//         if (frame_top) {
-//             svt_aom_fill_rect(src, CDEF_BSTRIDE, CDEF_VBORDER, hsize + 2 * CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
-//         if (frame_left) {
-//             svt_aom_fill_rect(src, CDEF_BSTRIDE, vsize + 2 * CDEF_VBORDER, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
-//         if (frame_bottom) {
-//             svt_aom_fill_rect(&src[(vsize + CDEF_VBORDER) * CDEF_BSTRIDE],
-//                               CDEF_BSTRIDE,
-//                               CDEF_VBORDER,
-//                               hsize + 2 * CDEF_HBORDER,
-//                               CDEF_VERY_LARGE);
-//         }
-//         if (frame_right) {
-//             svt_aom_fill_rect(
-//                 &src[hsize + CDEF_HBORDER], CDEF_BSTRIDE, vsize + 2 * CDEF_VBORDER, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
-//         /*Cdef filter calling function for high bit depth */
-//         if (use_highbd) {
-//             uint16_t *tmp_buff = (uint16_t *)rec_buff;
-//             svt_cdef_filter_fb(NULL,
-//                                &tmp_buff[rec_stride * (MI_SIZE_64X64 * fbr << mi_high_l2[pli]) +
-//                                          (fbc * MI_SIZE_64X64 << mi_wide_l2[pli])],
-//                                rec_stride,
-//                                &src[CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER],
-//                                sub_x,
-//                                sub_y,
-//                                dir,
-//                                NULL,
-//                                var,
-//                                pli,
-//                                dlist,
-//                                cdef_count,
-//                                level,
-//                                sec_strength,
-//                                pri_damping,
-//                                sec_damping,
-//                                coeff_shift,
-//                                1); // no subsampling
-//         }
-//         /*Cdef filter calling function for 8 bit depth */
-//         else
-//             svt_cdef_filter_fb(&rec_buff[rec_stride * (MI_SIZE_64X64 * fbr << mi_high_l2[pli]) +
-//                                          (fbc * MI_SIZE_64X64 << mi_wide_l2[pli])],
-//                                NULL,
-//                                rec_stride,
-//                                &src[CDEF_VBORDER * CDEF_BSTRIDE + CDEF_HBORDER],
-//                                sub_x,
-//                                sub_y,
-//                                dir,
-//                                NULL,
-//                                var,
-//                                pli,
-//                                dlist,
-//                                cdef_count,
-//                                level,
-//                                sec_strength,
-//                                pri_damping,
-//                                sec_damping,
-//                                coeff_shift,
-//                                1); // no subsampling
-//     } /*cdef plane loop ending*/
-//     //CHKN filtered data is written back directy to recFrame.
-//     *cdef_left = 1;
-// }
+    // svt_av1_setup_dst_planes1(pcs, pd, dec_handle->seq_header.sb_size, frame, 0, 0, 0, num_planes);
 
-// void svt_cdef_sb_row_mt(EbDecHandle *dec_handle, int32_t *mi_wide_l2, int32_t *mi_high_l2, uint16_t **colbuf,
-//                         int32_t sb_fbr, uint16_t *src, int32_t *curr_recon_stride, uint8_t **curr_blk_recon_buf) {
-//     FrameHeader  *frame_info = &dec_handle->frame_header;
-//     const int32_t nvfb       = (frame_info->mi_rows + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     const int32_t nhfb       = (frame_info->mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     /*For SB SIZE 128x128, we need two colbuf because, because we do cdef for
-//      each 64x64 in SB block in raster scan order,
-//      i.e for transversing across 0 - 3 64x64s in SB block*/
-//     uint16_t *colbuf_64[2][3];
-//     int32_t   sb_size_w       = block_size_wide[dec_handle->seq_header.sb_size];
-//     int32_t   pic_width_in_sb = (dec_handle->seq_header.max_frame_width + sb_size_w - 1) / sb_size_w;
+   const uint8_t quant_sz[4] = {16, 8, 32, 64};
+   for (int plane = 0; plane < num_planes; plane++) {
+        // 把pd[plane].dst.buf放进16位中，处理完了再放回去
+        const int pic_height = (plane == 0) ? frame->height : (frame->height / 2);
+        const int pic_width = (plane == 0) ? frame->width : (frame->width / 2);
+        const int dst_stride = (plane == 0) ? frame->stride_y : ((plane == 1) ? frame->stride_cb : frame->stride_cr);
+        uint16_t* dst_yuv16bit = (uint16_t *)malloc(dst_stride * pic_height * sizeof(uint16_t));
+        uint8_t* frame_buf = (plane == 0) ? frame->buffer_y : ((plane == 1) ? frame->buffer_cb : frame->buffer_cr);
+        for (int r = 0; r < pic_height; ++r) {
+            for (int c = 0; c < pic_width; ++c) {
+                dst_yuv16bit[r * dst_stride + c] = (uint16_t)frame_buf[r * dst_stride + c];
+            }
+        }
 
-//     const int32_t num_planes = av1_num_planes(&dec_handle->seq_header.color_config);
+        const uint8_t quant_step_size = quant_sz[frm_hdr->ccso_info.quant_idx[plane]];
+        if (frm_hdr->ccso_info.ccso_enable[plane]) {
+            dec_CCSO_FILTER_FUNC apply_ccso_filter_func = frm_hdr->ccso_info.max_band_log2[plane]
+                ? (plane > 0 ? dec_ccso_apply_chroma_mb_filter : dec_ccso_apply_luma_mb_filter)
+                : (plane > 0 ? dec_ccso_apply_chroma_sb_filter : dec_ccso_apply_luma_sb_filter);
+            apply_ccso_filter_func(dec_handle,
+                                    plane,
+                                    ext_rec_y,
+                                    // &(pd[plane].dst.buf)[0],
+                                    dst_yuv16bit,
+                                    dst_stride,
+                                    quant_step_size,
+                                    frm_hdr->ccso_info.ext_filter_support[plane],
+                                    frm_hdr->ccso_info.max_band_log2[plane],
+                                    frm_hdr->ccso_info.edge_clf[plane]);
+        }
 
-//     Bool sb_128 = dec_handle->seq_header.sb_size == BLOCK_128X128;
-//     for (int32_t pli = 0; pli < num_planes; pli++) {
-//         const int32_t block_height = (MI_SIZE_64X64 << mi_high_l2[pli]) + 2 * CDEF_VBORDER;
-//         /*Filling the colbuff's with some values.*/
-//         svt_aom_fill_rect(colbuf[pli], CDEF_HBORDER, block_height, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         colbuf_64[0][pli] = colbuf[pli];
-//         /*For SB SIZE 128x128, we are allocating extra colbuff for
-//         transversing across 0 - 3 64x64s in SB block */
-//         if (sb_128) {
-//             svt_aom_fill_rect(colbuf[pli + 3], CDEF_HBORDER, block_height, CDEF_HBORDER, CDEF_VERY_LARGE);
-//             colbuf_64[1][pli] = colbuf[3 + pli];
-//         }
-//     }
-//     DecMtFrameData    *dec_mt_frame_data          = &dec_handle->main_frame_buf.cur_frame_bufs[0].dec_mt_frame_data;
-//     volatile uint32_t *cdef_completed_in_prev_row = NULL;
-//     uint32_t          *cdef_completed_in_row, nsync = 1;
-
-//     uint8_t *curr_row_cdef_map = dec_mt_frame_data->row_cdef_map;
-//     uint32_t cdef_map_stride   = dec_mt_frame_data->cdef_map_stride;
-
-//     if (sb_fbr) {
-//         cdef_completed_in_prev_row = (volatile uint32_t *)&dec_mt_frame_data->cdef_completed_in_row[sb_fbr - 1];
-//     }
-//     cdef_completed_in_row = &dec_mt_frame_data->cdef_completed_in_row[sb_fbr];
-
-//     int32_t fbc_64, fbr_64;
-//     int32_t cnt_64           = sb_128 ? 4 : 1;
-//     int32_t sb_64_shift      = sb_128 ? 1 : 0;
-//     curr_row_cdef_map        = curr_row_cdef_map + 1 + cdef_map_stride;
-//     uint32_t cdef_left_64[2] = {1, 1};
-//     uint8_t *curr_row_cdef[2], *prev_row_cdef[2];
-
-//     curr_row_cdef[0] = curr_row_cdef_map + ((sb_fbr << sb_64_shift) * cdef_map_stride);
-//     prev_row_cdef[0] = curr_row_cdef[0] - cdef_map_stride;
-//     if (sb_128) {
-//         curr_row_cdef[1] = curr_row_cdef[0] + cdef_map_stride;
-//         prev_row_cdef[1] = curr_row_cdef[0];
-//     }
-//     /*for loop of SB cols*/
-//     for (int32_t sb_fbc = 0; sb_fbc < pic_width_in_sb; sb_fbc++) {
-//         /* Top-Right Sync*/
-//         if (sb_fbr) {
-//             if (sb_fbc == pic_width_in_sb - 1)
-//                 nsync = 0;
-//             while (*cdef_completed_in_prev_row < (sb_fbc + nsync))
-//                 ;
-//             //Sleep(5); /* ToDo : Change */
-//         }
-//         /*Curr multi thread implementation of cdef goes through every SB SIZE row*/
-//         /*If SB SIZE is 128x128, as cdef excepts top right sync,
-//         to process Bottom Right 64x64 block in (n) th SB BLOCK 128x128,
-//         we must have to process Top Left 64x64 block in (n+1) th  SB BLOCK 128x128 in the current SB ROW,
-//         below logic helps in do so*/
-//         if (0 == sb_fbc && sb_128) {
-//             int32_t row_cnt = 0;
-//             fbr_64          = (sb_fbr << sb_64_shift) + row_cnt;
-//             fbc_64          = row_cnt;
-//             svt_cdef_block(dec_handle,
-//                            mi_wide_l2,
-//                            mi_high_l2,
-//                            colbuf_64[row_cnt],
-//                            prev_row_cdef[row_cnt],
-//                            curr_row_cdef[row_cnt],
-//                            fbr_64,
-//                            fbc_64,
-//                            &cdef_left_64[row_cnt],
-//                            num_planes,
-//                            src,
-//                            curr_recon_stride,
-//                            curr_blk_recon_buf,
-//                            dec_mt_frame_data->cdef_linebuf[fbr_64], /*above*/
-//                            dec_mt_frame_data->cdef_linebuf[AOMMIN(fbr_64 + 1, nvfb - 1)], /*current*/
-//                            dec_mt_frame_data->cdef_linebuf_stride);
-//         }
-
-//         for (int32_t cnt = 0; cnt < cnt_64; cnt++) {
-//             int32_t row_cnt = (cnt & 2) >> 1;
-//             /*transversing across 0 - 3 64x64s or 1 128x128*/
-//             fbr_64 = (sb_fbr << sb_64_shift) + (row_cnt);
-//             fbc_64 = (sb_fbc << sb_64_shift) + (cnt & 1) + (sb_128 ? !row_cnt : 0);
-//             if (fbc_64 >= nhfb)
-//                 continue;
-//             if (fbr_64 >= nvfb)
-//                 continue;
-
-//             svt_cdef_block(dec_handle,
-//                            mi_wide_l2,
-//                            mi_high_l2,
-//                            colbuf_64[row_cnt],
-//                            prev_row_cdef[row_cnt],
-//                            curr_row_cdef[row_cnt],
-//                            fbr_64,
-//                            fbc_64,
-//                            &cdef_left_64[row_cnt],
-//                            num_planes,
-//                            src,
-//                            curr_recon_stride,
-//                            curr_blk_recon_buf,
-//                            dec_mt_frame_data->cdef_linebuf[fbr_64], /*above*/
-//                            dec_mt_frame_data->cdef_linebuf[AOMMIN(fbr_64 + 1, nvfb - 1)], /*current*/
-//                            dec_mt_frame_data->cdef_linebuf_stride);
-//         }
-//         /* Update Top-Right Sync*/
-//         *cdef_completed_in_row = sb_fbc;
-//     }
-// }
-
-// /* Frame level call, for CDEF */
-// void svt_cdef_frame(EbDecHandle *dec_handle, int enable_flag) {
-//     if (!enable_flag)
-//         return;
-
-//     EbPictureBufferDesc *recon_pic = dec_handle->cur_pic_buf[0]->ps_pic_buf;
-
-//     uint8_t      *curr_blk_recon_buf[MAX_MB_PLANE];
-//     int32_t       curr_recon_stride[MAX_MB_PLANE];
-//     FrameHeader  *frame_info = &dec_handle->frame_header;
-//     const int32_t num_planes = av1_num_planes(&dec_handle->seq_header.color_config);
-
-//     DECLARE_ALIGNED(16, uint16_t, src[CDEF_INBUF_SIZE]);
-//     uint16_t     *linebuf[3];
-//     uint16_t     *colbuf[3];
-//     uint8_t      *row_cdef, *prev_row_cdef, *curr_row_cdef;
-//     int32_t       mi_wide_l2[3];
-//     int32_t       mi_high_l2[3];
-//     const int32_t nvfb = (frame_info->mi_rows + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     const int32_t nhfb = (frame_info->mi_cols + MI_SIZE_64X64 - 1) / MI_SIZE_64X64;
-//     row_cdef           = (uint8_t *)svt_aom_malloc(sizeof(*row_cdef) * (nhfb + 2) * 2);
-
-//     assert(row_cdef != NULL);
-//     memset(row_cdef, 1, sizeof(*row_cdef) * (nhfb + 2) * 2);
-//     prev_row_cdef = row_cdef + 1;
-//     curr_row_cdef = prev_row_cdef + nhfb + 2;
-
-//     const int32_t stride = (frame_info->mi_cols << MI_SIZE_LOG2) + 2 * CDEF_HBORDER;
-
-//     for (int32_t pli = 0; pli < num_planes; pli++) {
-//         int32_t sub_x = (pli == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
-//         int32_t sub_y = (pli == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
-
-//         mi_wide_l2[pli] = MI_SIZE_LOG2 - sub_x;
-//         mi_high_l2[pli] = MI_SIZE_LOG2 - sub_y;
-
-//         /*Deriveing  recon pict buffer ptr's*/
-//         svt_aom_derive_blk_pointers(
-//             recon_pic, pli, 0, 0, (void *)&curr_blk_recon_buf[pli], &curr_recon_stride[pli], sub_x, sub_y);
-//         /*Allocating memory for line buffes->to fill from src if needed*/
-//         linebuf[pli] = (uint16_t *)svt_aom_malloc(sizeof(*linebuf) * CDEF_VBORDER * stride);
-//         /*Allocating memory for col buffes->to fill from src if needed*/
-//         colbuf[pli] = (uint16_t *)svt_aom_malloc(
-//             sizeof(*colbuf) * ((CDEF_BLOCKSIZE << mi_high_l2[pli]) + 2 * CDEF_VBORDER) * CDEF_HBORDER);
-//     }
-
-//     /*Loop for 64x64 block wise, along col wise for frame size*/
-//     for (int32_t fbr = 0; fbr < nvfb; fbr++) {
-//         for (int32_t pli = 0; pli < num_planes; pli++) {
-//             const int32_t block_height = (MI_SIZE_64X64 << mi_high_l2[pli]) + 2 * CDEF_VBORDER;
-//             /*Filling the colbuff's with some values.*/
-//             svt_aom_fill_rect(colbuf[pli], CDEF_HBORDER, block_height, CDEF_HBORDER, CDEF_VERY_LARGE);
-//         }
-
-//         uint32_t cdef_left = 1;
-//         /*Loop for 64x64 block wise, along row wise for frame size*/
-//         for (int32_t fbc = 0; fbc < nhfb; fbc++) {
-//             svt_cdef_block(dec_handle,
-//                            mi_wide_l2,
-//                            mi_high_l2,
-//                            colbuf,
-//                            prev_row_cdef,
-//                            curr_row_cdef,
-//                            fbr,
-//                            fbc,
-//                            &cdef_left,
-//                            num_planes,
-//                            src,
-//                            curr_recon_stride,
-//                            curr_blk_recon_buf,
-//                            linebuf,
-//                            linebuf,
-//                            stride);
-//         }
-//         uint8_t *tmp  = prev_row_cdef;
-//         prev_row_cdef = curr_row_cdef;
-//         curr_row_cdef = tmp;
-//     }
-//     svt_aom_free(row_cdef);
-//     for (int32_t pli = 0; pli < num_planes; pli++) {
-//         svt_aom_free(linebuf[pli]);
-//         svt_aom_free(colbuf[pli]);
-//     }
-// }
+        for (int r = 0; r < pic_height; ++r) {
+            for (int c = 0; c < pic_width; ++c) {
+               frame_buf[r * dst_stride + c] = (uint8_t)dst_yuv16bit[r * dst_stride + c];
+            }
+        }
+        free(dst_yuv16bit);
+        dst_yuv16bit = NULL;
+   }
+}

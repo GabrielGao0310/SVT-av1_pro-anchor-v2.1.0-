@@ -87,6 +87,13 @@ typedef struct TransformInfo {
 
 typedef struct SBInfo {
     int8_t  *sb_cdef_strength; /*!< At 64x64 blk level */
+    /** ccso blk y */
+    uint8_t* sb_ccso_blk_y;
+    /** ccso blk u */
+    uint8_t* sb_ccso_blk_u;
+    /** ccso blk v */
+    uint8_t* sb_ccso_blk_v;
+
     int32_t *sb_delta_q; /*!< At SB level */
     int32_t *sb_delta_lf; /*!< At SB level */
 
@@ -191,6 +198,13 @@ typedef struct PartitionInfo {
     const struct ScaleFactors *sf_identity;
 
     int8_t *cdef_strength;
+
+    /** ccso blk y */
+    uint8_t* ccso_blk_y;
+    /** ccso blk u */
+    uint8_t* ccso_blk_u;
+    /** ccso blk v */
+    uint8_t* ccso_blk_v;
 
     int32_t is_chroma_ref;
     /*MC temp buff for dynamic padding*/

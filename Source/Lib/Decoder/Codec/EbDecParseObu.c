@@ -404,6 +404,8 @@ EbErrorType read_sequence_header_obu(Bitstrm *bs, SeqHeader *seq_header) {
     PRINT("cdef_level", seq_header->cdef_level);
     seq_header->enable_restoration = svt_aom_dec_get_bits(bs, 1);
     PRINT("enable_restoration", seq_header->enable_restoration);
+    seq_header->enable_ccso = svt_aom_dec_get_bits(bs, 1);
+    PRINT("enable_ccso", seq_header->enable_ccso);
 
     read_color_config(bs, &seq_header->color_config, seq_header);
     seq_header->film_grain_params_present = svt_aom_dec_get_bits(bs, 1);
@@ -1071,6 +1073,76 @@ static void read_frame_cdef_params(Bitstrm *bs, FrameHeader *frame_info, SeqHead
             PRINT_FRAME("Primary UV cdef", frame_info->cdef_params.cdef_uv_strength[i]);
         }
     }
+}
+
+// read offset idx using truncated unary coding
+static int read_ccso_offset_idx(Bitstrm *bs) {
+    int offset_idx = 0;
+    for (int idx = 0; idx < 7; ++idx) {
+        const int cur_bit = svt_aom_dec_get_bits(bs, 1);
+        if (!cur_bit) break;
+        offset_idx++;
+    }
+    return offset_idx;
+}
+static void read_frame_ccso_params(Bitstrm *bs, FrameHeader *frame_info, SeqHeader *seq_header, int num_planes) {
+    if (frame_info->coded_lossless || frame_info->allow_intrabc || !seq_header->enable_ccso) {
+        return;
+    }
+    const int ccso_offset[8] = { 0, 1, -1, 3, -3, 7, -7, -10 };
+#if CONFIG_D143_CCSO_FM_FLAG
+    frame_info->ccso_info.ccso_frame_flag = svt_aom_dec_get_bits(bs, 1);
+    if (frame_info->ccso_info.ccso_frame_flag) {
+#endif  // CONFIG_D143_CCSO_FM_FLAG
+        for (int plane = 0; plane < num_planes; plane++) {
+            frame_info->ccso_info.ccso_enable[plane] = svt_aom_dec_get_bits(bs, 1);
+            if (frame_info->ccso_info.ccso_enable[plane]) {
+                frame_info->ccso_info.ccso_bo_only[plane] = svt_aom_dec_get_bits(bs, 1);
+#if !CONFIG_CCSO_SIGFIX
+                frame_info->ccso_info.quant_idx[plane] = svt_aom_dec_get_bits(bs, 2);
+                frame_info->ccso_info.ext_filter_support[plane] = svt_aom_dec_get_bits(bs, 3);
+#endif  // !CONFIG_CCSO_SIGFIX
+                if (frame_info->ccso_info.ccso_bo_only[plane]) {
+#if CONFIG_CCSO_SIGFIX
+                    frame_info->ccso_info.quant_idx[plane] = 0;
+                    frame_info->ccso_info.ext_filter_support[plane] = 0;
+                    frame_info->ccso_info.edge_clf[plane] = 0;
+#endif  // CONFIG_CCSO_SIGFIX
+                    frame_info->ccso_info.max_band_log2[plane] = svt_aom_dec_get_bits(bs, 3);
+                } else {
+#if CONFIG_CCSO_SIGFIX
+                    frame_info->ccso_info.quant_idx[plane] = svt_aom_dec_get_bits(bs, 2);
+                    frame_info->ccso_info.ext_filter_support[plane] = svt_aom_dec_get_bits(bs, 3);
+                    frame_info->ccso_info.edge_clf[plane] = svt_aom_dec_get_bits(bs, 1);
+#endif  // CONFIG_CCSO_SIGFIX
+                    frame_info->ccso_info.max_band_log2[plane] = svt_aom_dec_get_bits(bs, 2);
+                    }
+                    const int max_band = 1 << frame_info->ccso_info.max_band_log2[plane];
+#if !CONFIG_CCSO_SIGFIX
+                    frame_info->ccso_info.edge_clf[plane] = svt_aom_dec_get_bits(bs, 1);
+#endif  // !CONFIG_CCSO_SIGFIX
+                    const int edge_clf = frame_info->ccso_info.edge_clf[plane];
+                    const int max_edge_interval = edge_clf_to_edge_interval[edge_clf];
+                    const int num_edge_offset_intervals = frame_info->ccso_info.ccso_bo_only[plane] ? 1 : max_edge_interval;
+                    for (int d0 = 0; d0 < num_edge_offset_intervals; d0++) {
+                        for (int d1 = 0; d1 < num_edge_offset_intervals; d1++) {
+                            for (int band_num = 0; band_num < max_band; band_num++) {
+                                const int lut_idx_ext = (band_num << 4) + (d0 << 2) + d1;
+                                const int offset_idx = read_ccso_offset_idx(bs);
+                                frame_info->ccso_info.filter_offset[plane][lut_idx_ext] =
+                                    ccso_offset[offset_idx];
+                            }
+                        }
+                    }
+            }
+        }
+#if CONFIG_D143_CCSO_FM_FLAG
+  } else {
+    frame_info->ccso_info.ccso_enable[0] = 0;
+    frame_info->ccso_info.ccso_enable[1] = 0;
+    frame_info->ccso_info.ccso_enable[2] = 0;
+  }
+#endif  // CONFIG_D143_CCSO_FM_FLAG
 }
 
 static int decode_subexp(Bitstrm *bs, int numSyms) {
@@ -2043,6 +2115,7 @@ void read_uncompressed_header(Bitstrm *bs, EbDecHandle *dec_handle_ptr, ObuHeade
     read_loop_filter_params(bs, dec_handle_ptr, num_planes);
     read_frame_cdef_params(bs, frame_info, seq_header, num_planes);
     read_lr_params(bs, frame_info, seq_header, num_planes);
+    read_frame_ccso_params(bs, frame_info, seq_header, num_planes);
     read_tx_mode(bs, frame_info);
 
     frame_info->reference_mode = read_frame_reference_mode(bs, frame_is_intra) ? REFERENCE_MODE_SELECT
@@ -2184,6 +2257,12 @@ static EbErrorType read_tile_group_obu(Bitstrm *bs, EbDecHandle *dec_handle_ptr,
          (frame_header->cdef_params.cdef_bits || frame_header->cdef_params.cdef_y_strength[0] ||
           frame_header->cdef_params.cdef_uv_strength[0]));
 
+    /* CCSO */
+    Bool do_ccso = no_ibc &&
+        (!frame_header->coded_lossless &&
+         (frame_header->ccso_info.ccso_enable[0] || frame_header->ccso_info.ccso_enable[1] ||
+         frame_header->ccso_info.ccso_enable[2]));
+
     Bool do_upscale = no_ibc && !av1_superres_unscaled(&dec_handle_ptr->frame_header.frame_size);
     /* LR */
     //Bool opt_lr = !do_cdef && !do_upscale;
@@ -2317,6 +2396,28 @@ static EbErrorType read_tile_group_obu(Bitstrm *bs, EbDecHandle *dec_handle_ptr,
                                           do_lf_flag);
     }
 
+#if CCSO
+    uint16_t* ext_rec_y = NULL;
+    EbPictureBufferDesc * curbuf = dec_handle_ptr->cur_pic_buf[0]->ps_pic_buf;
+    const int ccso_stride_ext = curbuf->width + (CCSO_PADDING_SIZE << 1);
+    if (ext_rec_y == NULL) {
+        ext_rec_y = svt_aom_malloc(sizeof(*ext_rec_y) * (curbuf->height + (CCSO_PADDING_SIZE << 1)) * (curbuf->width + (CCSO_PADDING_SIZE << 1)));
+    }
+    for (int pli = 0; pli < 1; pli++) {
+        const int pic_height = curbuf->height;
+        const int pic_width = curbuf->width;
+        const int dst_stride = curbuf->stride_y;
+        for (int r = 0; r < pic_height; ++r) {
+            for (int c = 0; c < pic_width; ++c) {
+                if (pli == 0) {
+                    ext_rec_y[(r + CCSO_PADDING_SIZE) * ccso_stride_ext + c + CCSO_PADDING_SIZE] = (uint16_t)curbuf->buffer_y[r * dst_stride + c];
+                }
+            }
+        }
+    }
+    dec_extend_ccso_border(ext_rec_y, CCSO_PADDING_SIZE, curbuf);
+#endif
+
     if (!is_mt && do_lr)
         svt_aom_dec_av1_loop_restoration_save_boundary_lines(dec_handle_ptr, 0);
 
@@ -2324,7 +2425,12 @@ static EbErrorType read_tile_group_obu(Bitstrm *bs, EbDecHandle *dec_handle_ptr,
         svt_cdef_frame_mt(dec_handle_ptr, NULL);
     } else
         svt_cdef_frame(dec_handle_ptr, do_cdef);
-
+#if CCSO
+    if (do_ccso) {
+    dec_ccso_frame(curbuf, dec_handle_ptr, ext_rec_y);
+    svt_aom_free(ext_rec_y);
+    }
+#endif
     svt_av1_superres_upscale(&dec_handle_ptr->cm,
                              &dec_handle_ptr->frame_header,
                              &dec_handle_ptr->seq_header,

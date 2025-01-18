@@ -364,6 +364,7 @@ EbErrorType svt_release_mutex(EbHandle mutex_handle) {
 #ifdef _WIN32
     return_error = !ReleaseMutex((HANDLE)mutex_handle) ? EB_ErrorMutexUnresponsive : EB_ErrorNone;
 #else
+    // printf("Thread %lu is unlocking the mutex.\n", (unsigned long)pthread_self());
     return_error = pthread_mutex_unlock((pthread_mutex_t *)mutex_handle) ? EB_ErrorMutexUnresponsive : EB_ErrorNone;
 #endif
 
@@ -379,7 +380,9 @@ EbErrorType svt_block_on_mutex(EbHandle mutex_handle) {
 #ifdef _WIN32
     return_error = WaitForSingleObject((HANDLE)mutex_handle, INFINITE) ? EB_ErrorMutexUnresponsive : EB_ErrorNone;
 #else
+    // printf("Thread %lu is trying to lock the mutex.\n", (unsigned long)pthread_self());
     return_error = pthread_mutex_lock((pthread_mutex_t *)mutex_handle) ? EB_ErrorMutexUnresponsive : EB_ErrorNone;
+    // printf("Thread %lu has locked the mutex.\n", (unsigned long)pthread_self());
 #endif
 
     return return_error;

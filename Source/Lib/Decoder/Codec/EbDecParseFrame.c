@@ -234,13 +234,22 @@ EbErrorType parse_tile(EbDecHandle *dec_handle_ptr, ParseCtxt *parse_ctx, TilesI
             int cdef_factor           = dec_handle_ptr->seq_header.use_128x128_superblock ? 4 : 1;
             sb_info->sb_cdef_strength = frame_buf->cdef_strength +
                 (((sb_row * main_frame_buf->sb_cols) + sb_col) * cdef_factor);
-
+            sb_info->sb_ccso_blk_y = frame_buf->ccso_blk_y +
+                (((sb_row * main_frame_buf->sb_cols) + sb_col) * cdef_factor);
+            sb_info->sb_ccso_blk_u = frame_buf->ccso_blk_u +
+                (((sb_row * main_frame_buf->sb_cols) + sb_col) * cdef_factor);
+            sb_info->sb_ccso_blk_v = frame_buf->ccso_blk_v +
+                (((sb_row * main_frame_buf->sb_cols) + sb_col) * cdef_factor);
             sb_info->sb_delta_lf = frame_buf->delta_lf +
                 (FRAME_LF_COUNT * ((sb_row * main_frame_buf->sb_cols) + sb_col));
 
             sb_info->sb_delta_q = frame_buf->delta_q + (sb_row * main_frame_buf->sb_cols) + sb_col;
 
             clear_cdef(sb_info->sb_cdef_strength, cdef_factor);
+            memset(sb_info->sb_ccso_blk_y, 0, cdef_factor * sizeof(*sb_info->sb_ccso_blk_y));
+            memset(sb_info->sb_ccso_blk_u, 0, cdef_factor * sizeof(*sb_info->sb_ccso_blk_u));
+            memset(sb_info->sb_ccso_blk_v, 0, cdef_factor * sizeof(*sb_info->sb_ccso_blk_v));
+
 
             parse_ctx->first_txb_offset[AOM_PLANE_Y] = 0;
             parse_ctx->first_txb_offset[AOM_PLANE_U] = 0;

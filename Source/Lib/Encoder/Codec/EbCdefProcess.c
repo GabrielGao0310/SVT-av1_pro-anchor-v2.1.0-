@@ -26,6 +26,7 @@
 #include "EbPictureControlSet.h"
 #include "EbResize.h"
 #include "EbPickccso.h"
+#include <sys/prctl.h>
 
 
 void svt_av1_setup_dst_planes(PictureControlSet *pcs, struct MacroblockdPlane *planes, BlockSize bsize,
@@ -403,12 +404,16 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         }
         //all seg based search is done. update total processed segments. if all done, finish the search and perfrom application.
         svt_block_on_mutex(pcs->cdef_search_mutex);
+        // 获取线程 ID 和名称
+        // pthread_t tid = pthread_self();
+        // char thread_name[16];
+        // prctl(PR_GET_NAME, thread_name, 0, 0, 0);
+        // printf("\nThread ID: %lu, Thread Name: %s entered the critical section.\n", (unsigned long)tid, thread_name);
         // cdef_and_ccso(pcs); // 尝试外部函数解决多线程问题，未果
-
         // printf("\nccso\n");
 #if CCSO
         uint8_t* ref_yuv[3] = {NULL, NULL, NULL};
-        EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic;
+        EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic; //原图像
         const uint32_t       input_offset_y = ref->org_x + ref->org_y * ref->stride_y;
         ref_yuv[0]           = ref->buffer_y + (input_offset_y << is_16bit);
         const uint32_t input_offset_cb      = (ref->org_x + ref->org_y * ref->stride_cb) >> 1;
@@ -474,7 +479,12 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
 
         if (ext_rec_y == NULL) {
             ext_rec_y = svt_aom_malloc(sizeof(*ext_rec_y) * (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) * (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
-            // printf("\nmalloc ext_rec_y\n");
+            if (ext_rec_y == NULL) {
+                // printf("\nFailed to malloc ext_rec_y\n");
+            } else {
+                // printf("\nmalloc ext_rec_y at address: %p, size: %zu\n", (void*)ext_rec_y, sizeof(*ext_rec_y) * (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) * (pd[0].dst.width + (CCSO_PADDING_SIZE << 1)));
+                memset(ext_rec_y, 0, sizeof(*ext_rec_y) * (pd[0].dst.height + (CCSO_PADDING_SIZE << 1)) * (pd[0].dst.width + (CCSO_PADDING_SIZE << 1))); // 初始化内存
+            }
         }
 
         for (int pli = 0; pli < 1; pli++) {
@@ -608,9 +618,9 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             // }
 
 
-
-            ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
-            ccso_frame(recon_pic, pcs, pd, ext_rec_y);
+            // // ccso过程
+            // ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
+            // ccso_frame(recon_pic, pcs, pd, ext_rec_y);
 
 
             // // 算一下rec和org的sse，好像不大对劲

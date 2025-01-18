@@ -273,6 +273,14 @@ static EbErrorType init_main_frame_ctxt(EbDecHandle  *dec_handle_ptr) {
             (seq_header->use_128x128_superblock ? 4 : 1) *
             sizeof(int8_t)));
 
+        /* ccso_blk_yuv allocation at SB level */
+        EB_MALLOC_DEC(uint8_t*, cur_frame_buf->ccso_blk_y, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+        memset(cur_frame_buf->ccso_blk_y, 0, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+        EB_MALLOC_DEC(uint8_t*, cur_frame_buf->ccso_blk_u, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+        memset(cur_frame_buf->ccso_blk_u, 0, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+        EB_MALLOC_DEC(uint8_t*, cur_frame_buf->ccso_blk_v, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+        memset(cur_frame_buf->ccso_blk_v, 0, (num_sb * (seq_header->use_128x128_superblock ? 4 : 1) * sizeof(uint8_t)));
+
         /* delta_lf allocation at SB level */
         EB_MALLOC_DEC(int32_t*, cur_frame_buf->delta_lf,
             (num_sb * FRAME_LF_COUNT * sizeof(int32_t)));

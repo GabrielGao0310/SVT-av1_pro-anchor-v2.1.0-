@@ -93,6 +93,13 @@ typedef struct CurFrameBuf {
     TransformInfo_t *trans_info[MAX_MB_PLANE - 1];
 
     int8_t  *cdef_strength;
+    /** ccso blk y */
+    uint8_t* ccso_blk_y;
+    /** ccso blk u */
+    uint8_t* ccso_blk_u;
+    /** ccso blk v */
+    uint8_t* ccso_blk_v;
+    
     int32_t *delta_q;
     int32_t *delta_lf;
 

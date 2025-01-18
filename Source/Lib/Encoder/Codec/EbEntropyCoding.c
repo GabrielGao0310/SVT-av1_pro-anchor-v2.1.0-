@@ -2359,9 +2359,10 @@ static AOM_INLINE void write_ccso_offset_idx(struct AomWriteBitBuffer *wb, int o
     }
 }
 static AOM_INLINE void encode_ccso(const PictureParentControlSet *pcs, struct AomWriteBitBuffer *wb) {
-    // if (is_global_intrabc_allowed(cm)) return;
     const FrameHeader *frm_hdr = &pcs->frm_hdr;
-    
+    if (frm_hdr->allow_intrabc)
+        return;
+
     const int ccso_offset[8] = { 0, 1, -1, 3, -3, 7, -7, -10 };
 #if CONFIG_D143_CCSO_FM_FLAG
     svt_aom_wb_write_literal(wb, frm_hdr->ccso_info.ccso_frame_flag, 1);
@@ -2862,8 +2863,13 @@ static void write_sequence_header(SequenceControlSet *scs, struct AomWriteBitBuf
 
     svt_aom_wb_write_bit(wb, scs->seq_header.enable_superres);
     svt_aom_wb_write_bit(wb, scs->seq_header.cdef_level);
-    svt_aom_wb_write_bit(wb, scs->seq_header.enable_ccso);
     svt_aom_wb_write_bit(wb, scs->seq_header.enable_restoration);
+#if CCSO
+        scs->seq_header.enable_ccso = 1;
+#else
+        scs->seq_header.enable_ccso = 0;
+#endif
+    svt_aom_wb_write_bit(wb, scs->seq_header.enable_ccso);
 }
 
 // Recenters a non-negative literal v around a reference r
@@ -3603,7 +3609,7 @@ static void write_uncompressed_header_obu(SequenceControlSet *scs /*Av1Comp *cpi
 #else
         scs->seq_header.enable_ccso = 0;
 #endif
-        if (scs->seq_header.enable_ccso) {
+        if (!frm_hdr->coded_lossless && scs->seq_header.enable_ccso) {
             encode_ccso(pcs, wb);
         }
     }
@@ -4014,7 +4020,8 @@ static  void write_ccso(SequenceControlSet *seqCSetPtr, PictureControlSet *p_pcs
         // frm_hdr->ccso_info.
         return;
     }
-
+    
+    // 64 x 64
   const int blk_size_y =
       (1 << (CCSO_BLK_SIZE + 1 - MI_SIZE_LOG2)) - 1;
     //   (1 << (CCSO_BLK_SIZE + xd->plane[1].subsampling_y - MI_SIZE_LOG2)) - 1;

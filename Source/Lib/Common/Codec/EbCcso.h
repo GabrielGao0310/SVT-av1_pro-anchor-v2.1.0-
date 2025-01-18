@@ -8,7 +8,7 @@
 #include "Source/Lib/Encoder/Codec/EbSequenceControlSet.h"
 #include "EbAv1Structs.h"
 #include "EbUtility.h"
-#define CCSO 0
+#define CCSO 1
 
 
 #define CCSO_INPUT_INTERVAL 3
@@ -43,6 +43,7 @@ void ccso_frame(EbPictureBufferDesc *frame, PictureControlSet *pcs, MacroblockdP
 typedef void (*CCSO_FILTER_FUNC)(PictureControlSet *pcs, MacroblockdPlane *pd, const int plane, const uint16_t *src_y,
                                  uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                                  const uint8_t max_band_log2, const int edge_clf);
+
 
 void ccso_filter_block_hbd_with_buf_c(const uint16_t *src_y, uint16_t *dst_yuv, const uint8_t *src_cls0,
                                    const uint8_t *src_cls1, const int src_y_stride, const int dst_stride,

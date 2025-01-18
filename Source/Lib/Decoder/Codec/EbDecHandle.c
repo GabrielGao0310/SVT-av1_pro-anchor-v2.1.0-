@@ -564,14 +564,14 @@ EB_API EbErrorType svt_av1_dec_frame(EbComponentType *svt_dec_component, const u
     while (data_start < data_end) {
         /*TODO : Remove or move. For Test purpose only */
         dec_handle_ptr->dec_cnt++;
-        //SVT_LOG("\n SVT-AV1 Dec : Decoding Pic #%d", dec_handle_ptr->dec_cnt);
+        SVT_LOG("\n SVT-AV1 Dec : Decoding Pic #%d", dec_handle_ptr->dec_cnt);
 
         uint64_t frame_size = 0;
         frame_size          = data_end - data_start;
         return_error        = svt_aom_decode_multiple_obu(dec_handle_ptr, &data_start, frame_size, is_annexb);
 
         if (return_error != EB_ErrorNone)
-            assert(0);
+            assert(0); //assert(0)
 
         svt_aom_dec_pic_mgr_update_ref_pic(
             dec_handle_ptr, (EB_ErrorNone == return_error) ? 1 : 0, dec_handle_ptr->frame_header.refresh_frame_flags);
@@ -584,11 +584,11 @@ EB_API EbErrorType svt_av1_dec_frame(EbComponentType *svt_dec_component, const u
             ++data;
         }
 
-        /*SVT_LOG("\nDecoding Pic #%d  frm_w : %d    frm_h : %d
-            frm_typ : %d", dec_handle_ptr->dec_cnt,
-            dec_handle_ptr->frame_header.frame_size.frame_width,
-            dec_handle_ptr->frame_header.frame_size.frame_height,
-            dec_handle_ptr->frame_header.frame_type);*/
+        // SVT_LOG("\nDecoding Pic #%d  frm_w : %d    frm_h : %dfrm_typ : %d", 
+        //     dec_handle_ptr->dec_cnt,
+        //     dec_handle_ptr->frame_header.frame_size.frame_width,
+        //     dec_handle_ptr->frame_header.frame_size.frame_height,
+        //     dec_handle_ptr->frame_header.frame_type);
     }
 
     return return_error;
