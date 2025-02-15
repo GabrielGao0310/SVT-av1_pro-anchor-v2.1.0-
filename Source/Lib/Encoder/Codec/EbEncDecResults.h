@@ -36,7 +36,14 @@ typedef struct CdefResults {
     EbDctor          dctor;
     EbObjectWrapper *pcs_wrapper;
     uint32_t         segment_index;
+    // uint16_t* ext_rec_y;
 } CdefResults;
+
+// typedef struct CcsoResults {
+//     EbDctor          dctor;
+//     EbObjectWrapper *pcs_wrapper;
+//     uint32_t         segment_index;
+// } CcsoResults;
 
 typedef struct RestResults {
     EbDctor          dctor;

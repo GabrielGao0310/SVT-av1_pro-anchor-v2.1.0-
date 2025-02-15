@@ -795,7 +795,8 @@ static EbErrorType load_default_buffer_configuration_settings(
         scs->total_process_init_count += (scs->enc_dec_process_init_count                     = clamp(3, scs->picture_control_set_pool_init_count_child, max_md_proc));
         scs->total_process_init_count += (scs->entropy_coding_process_init_count              = clamp(1, 1, max_ec_proc));
         scs->total_process_init_count += (scs->dlf_process_init_count                         = clamp(1, 1, max_dlf_proc));
-        scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(6, 1, max_cdef_proc));
+        // scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(6, 1, max_cdef_proc));
+        scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
         scs->total_process_init_count += (scs->rest_process_init_count                        = clamp(1, 1, max_rest_proc));
     }
     else if (core_count < PARALLEL_LEVEL_4_RANGE) {
@@ -807,7 +808,8 @@ static EbErrorType load_default_buffer_configuration_settings(
         scs->total_process_init_count += (scs->enc_dec_process_init_count                     = clamp(10, scs->picture_control_set_pool_init_count_child, max_md_proc));
         scs->total_process_init_count += (scs->entropy_coding_process_init_count              = clamp(max_ec_proc, 1, max_ec_proc));
         scs->total_process_init_count += (scs->dlf_process_init_count                         = clamp(max_dlf_proc, 1, max_dlf_proc));
-        scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(max_cdef_proc, 1, max_cdef_proc));
+        scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
+        // scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(max_cdef_proc, 1, max_cdef_proc));
         scs->total_process_init_count += (scs->rest_process_init_count                        = clamp(4, 1, max_rest_proc));
     }
     else if (core_count < PARALLEL_LEVEL_8_RANGE) {
@@ -819,7 +821,8 @@ static EbErrorType load_default_buffer_configuration_settings(
         scs->total_process_init_count += (scs->enc_dec_process_init_count                     = clamp(50, scs->picture_control_set_pool_init_count_child, max_md_proc));
         scs->total_process_init_count += (scs->entropy_coding_process_init_count              = clamp(max_ec_proc, 1, max_ec_proc));
         scs->total_process_init_count += (scs->dlf_process_init_count                         = clamp(max_dlf_proc, 1, max_dlf_proc));
-        scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(max_cdef_proc, 1, max_cdef_proc));
+        scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
+        // scs->total_process_init_count += (scs->cdef_process_init_count                        = clamp(max_cdef_proc, 1, max_cdef_proc));
         scs->total_process_init_count += (scs->rest_process_init_count                        = clamp(4, 1, max_rest_proc));
     }
     else {
@@ -833,7 +836,8 @@ static EbErrorType load_default_buffer_configuration_settings(
             scs->total_process_init_count += (scs->enc_dec_process_init_count = clamp(50, scs->picture_control_set_pool_init_count_child, max_md_proc));
             scs->total_process_init_count += (scs->entropy_coding_process_init_count = clamp(max_ec_proc, 1, max_ec_proc));
             scs->total_process_init_count += (scs->dlf_process_init_count = clamp(max_dlf_proc, 1, max_dlf_proc));
-            scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
+            scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
+            // scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
             scs->total_process_init_count += (scs->rest_process_init_count = clamp(4, 1, max_rest_proc));
         }
         else
@@ -847,7 +851,8 @@ static EbErrorType load_default_buffer_configuration_settings(
                 scs->total_process_init_count += (scs->enc_dec_process_init_count = clamp(50, scs->picture_control_set_pool_init_count_child, max_md_proc));
                 scs->total_process_init_count += (scs->entropy_coding_process_init_count = clamp(max_ec_proc, 1, max_ec_proc));
                 scs->total_process_init_count += (scs->dlf_process_init_count = clamp(max_dlf_proc, 1, max_dlf_proc));
-                scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
+                scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
+                // scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
                 scs->total_process_init_count += (scs->rest_process_init_count = clamp(4, 1, max_rest_proc));
             }
             else {
@@ -860,7 +865,8 @@ static EbErrorType load_default_buffer_configuration_settings(
                     scs->picture_control_set_pool_init_count_child, max_md_proc));
                 scs->total_process_init_count += (scs->entropy_coding_process_init_count = clamp(max_ec_proc, 1, max_ec_proc));
                 scs->total_process_init_count += (scs->dlf_process_init_count = clamp(max_dlf_proc, 1, max_dlf_proc));
-                scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
+                scs->total_process_init_count += (scs->cdef_process_init_count                        = 1);
+                // scs->total_process_init_count += (scs->cdef_process_init_count = clamp(max_cdef_proc, 1, max_cdef_proc));
                 scs->total_process_init_count += (scs->rest_process_init_count = clamp(10, 1, max_rest_proc));
             }
         }

@@ -59,8 +59,8 @@ void dec_ccso_apply_luma_mb_filter(EbDecHandle * dec_handle, const int plane, co
    src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
-           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
-
+        //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
@@ -145,8 +145,9 @@ void dec_ccso_apply_luma_sb_filter(EbDecHandle * dec_handle, const int plane, co
    src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
-           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+        //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
+            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
@@ -231,8 +232,9 @@ void dec_ccso_apply_chroma_mb_filter(EbDecHandle * dec_handle, const int plane, 
    src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
-           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+        //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
+            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
@@ -319,7 +321,8 @@ void dec_ccso_apply_chroma_sb_filter(EbDecHandle * dec_handle, const int plane, 
     src_y += CCSO_PADDING_SIZE * ccso_ext_stride + CCSO_PADDING_SIZE;
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
-           const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+        //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
+            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);

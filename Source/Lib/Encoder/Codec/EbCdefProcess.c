@@ -396,7 +396,8 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         frm_hdr                  = &pcs->ppcs->frm_hdr;
         CdefControls *cdef_ctrls = &pcs->ppcs->cdef_ctrls;
         
-
+        // // 记录开始时间
+        // clock_t start_cdef = clock();
         if (!cdef_ctrls->use_reference_cdef_fs) {
             if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
                 cdef_seg_search(pcs, scs, dlf_results->segment_index);
@@ -426,6 +427,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         uint16_t *ext_rec_y = NULL;
         const int num_planes = av1_num_planes(&scs->seq_header.color_config);
         // printf("\nccso begin\n");
+
         EbPictureBufferDesc *recon_pic;
         svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
         struct MacroblockdPlane pd[3];
@@ -520,6 +522,12 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 pcs->ppcs->nb_cdef_strengths             = 1;
                 frm_hdr->cdef_params.cdef_uv_strength[0] = 0;
             }
+            // // 记录结束时间
+            // clock_t end_cdef = clock();
+            // // 计算运行时间（以秒为单位）
+            // double cpu_time_used_cdef = ((double) (end_cdef - start_cdef)) / CLOCKS_PER_SEC;
+            // // 输出运行时间
+            // printf("cdef运行时间: %f 秒\n", cpu_time_used_cdef);
 
 #if CCSO
             svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
@@ -617,11 +625,17 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             //     mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
             // }
 
-
-            // // ccso过程
-            // ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
-            // ccso_frame(recon_pic, pcs, pd, ext_rec_y);
-
+            // // 记录开始时间
+            // clock_t start_ccso = clock();
+            // ccso过程
+            ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
+            ccso_frame(recon_pic, pcs, pd, ext_rec_y);
+            // // 记录结束时间
+            // clock_t end_ccso = clock();
+            // // 计算运行时间（以秒为单位）
+            // double cpu_time_used_ccso = ((double) (end_ccso - start_ccso)) / CLOCKS_PER_SEC;
+            // // 输出运行时间
+            // printf("ccso运行时间: %f 秒\n", cpu_time_used_ccso);
 
             // // 算一下rec和org的sse，好像不大对劲
             // double mse5[3] = {0, 0, 0}; //rec和org
@@ -722,6 +736,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 cdef_results                = (struct CdefResults *)cdef_results_wrapper->object_ptr;
                 cdef_results->pcs_wrapper   = dlf_results->pcs_wrapper;
                 cdef_results->segment_index = segment_index;
+                // cdef_results->ext_rec_y = ext_rec_y;
                 // Post Cdef Results
                 svt_post_full_object(cdef_results_wrapper);
             }

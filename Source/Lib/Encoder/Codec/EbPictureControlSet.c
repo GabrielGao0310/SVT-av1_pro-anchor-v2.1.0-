@@ -210,6 +210,7 @@ static void picture_control_set_dctor(EbPtr p) {
     EB_DESTROY_MUTEX(obj->entropy_coding_pic_mutex);
     EB_DESTROY_MUTEX(obj->intra_mutex);
     EB_DESTROY_MUTEX(obj->cdef_search_mutex);
+    // EB_DESTROY_MUTEX(obj->ccso_search_mutex);
     EB_DESTROY_MUTEX(obj->rest_search_mutex);
 }
 
@@ -1030,6 +1031,7 @@ static EbErrorType picture_control_set_ctor(PictureControlSet *object_ptr, EbPtr
     EB_CREATE_MUTEX(object_ptr->intra_mutex);
 
     EB_CREATE_MUTEX(object_ptr->cdef_search_mutex);
+    // EB_CREATE_MUTEX(object_ptr->ccso_search_mutex);
 
     //object_ptr->mse_seg[0] = (uint64_t(*)[64])svt_aom_malloc(sizeof(**object_ptr->mse_seg) *  picture_sb_width * picture_sb_height);
     // object_ptr->mse_seg[1] = (uint64_t(*)[64])svt_aom_malloc(sizeof(**object_ptr->mse_seg) *  picture_sb_width * picture_sb_height);

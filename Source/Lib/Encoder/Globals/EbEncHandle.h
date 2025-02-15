@@ -115,6 +115,7 @@ struct _EbEncHandle {
     EbSystemResource  *entropy_coding_results_resource_ptr;
     EbSystemResource  *dlf_results_resource_ptr;
     EbSystemResource  *cdef_results_resource_ptr;
+    // EbSystemResource  *ccso_results_resource_ptr;
     EbSystemResource  *rest_results_resource_ptr;
 
     // Callbacks
