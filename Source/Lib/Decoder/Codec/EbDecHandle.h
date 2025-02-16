@@ -94,10 +94,10 @@ typedef struct CurFrameBuf {
 
     int8_t  *cdef_strength;
     /** ccso blk y */
-    uint8_t* ccso_blk_y;
+    uint8_t* ccso_blk_y; // 256x256
     /** ccso blk u */
-    uint8_t* ccso_blk_u;
     /** ccso blk v */
+    uint8_t* ccso_blk_u;
     uint8_t* ccso_blk_v;
     
     int32_t *delta_q;

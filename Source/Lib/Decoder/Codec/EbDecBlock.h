@@ -87,7 +87,7 @@ typedef struct TransformInfo {
 
 typedef struct SBInfo {
     int8_t  *sb_cdef_strength; /*!< At 64x64 blk level */
-    /** ccso blk y */
+    /** ccso blk y */ /*!< At 256x256 blk level 中的每个64x64*/
     uint8_t* sb_ccso_blk_y;
     /** ccso blk u */
     uint8_t* sb_ccso_blk_u;
@@ -199,7 +199,7 @@ typedef struct PartitionInfo {
 
     int8_t *cdef_strength;
 
-    /** ccso blk y */
+    /** ccso blk y */ //每个256x256内的都相等。
     uint8_t* ccso_blk_y;
     /** ccso blk u */
     uint8_t* ccso_blk_u;

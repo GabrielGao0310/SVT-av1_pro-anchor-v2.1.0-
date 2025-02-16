@@ -2407,10 +2407,11 @@ static EbErrorType read_tile_group_obu(Bitstrm *bs, EbDecHandle *dec_handle_ptr,
         const int pic_height = curbuf->height;
         const int pic_width = curbuf->width;
         const int dst_stride = curbuf->stride_y;
+        int buf_y_offset = curbuf->org_y * curbuf->stride_y + curbuf->org_x;
         for (int r = 0; r < pic_height; ++r) {
             for (int c = 0; c < pic_width; ++c) {
                 if (pli == 0) {
-                    ext_rec_y[(r + CCSO_PADDING_SIZE) * ccso_stride_ext + c + CCSO_PADDING_SIZE] = (uint16_t)curbuf->buffer_y[r * dst_stride + c];
+                    ext_rec_y[(r + CCSO_PADDING_SIZE) * ccso_stride_ext + c + CCSO_PADDING_SIZE] = (uint16_t)curbuf->buffer_y[r * dst_stride + c + buf_y_offset];
                 }
             }
         }

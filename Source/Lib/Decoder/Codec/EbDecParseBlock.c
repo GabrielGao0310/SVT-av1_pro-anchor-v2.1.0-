@@ -355,31 +355,40 @@ static void read_ccso(ParseCtxt *parse_ctxt, PartitionInfo *xd) {
         const int blk_idc =
             svt_read_symbol(r, ec_ctx->ccso_cdf[0], 2, ACCT_STR);
         xd->ccso_blk_y[0] = blk_idc;
+        if (parse_ctxt->seq_header->sb_size == BLOCK_128X128) {
+            xd->ccso_blk_y[0] = xd->ccso_blk_y[1] = xd->ccso_blk_y[2] = xd->ccso_blk_y[3] = blk_idc;
+        }
         // mi_params
         //     ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
         //                 (mi_col & ~blk_size_x)]
         //     ->ccso_blk_y = blk_idc;
     }
 
-  if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) && frame_header->ccso_info.ccso_enable[1]) {
-    const int blk_idc =
-        svt_read_symbol(r, ec_ctx->ccso_cdf[1], 2, ACCT_STR);
-    xd->ccso_blk_u[0] = blk_idc;
-    // mi_params
-    //     ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
-    //                    (mi_col & ~blk_size_x)]
-    //     ->ccso_blk_u = blk_idc;
-  }
+    if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) && frame_header->ccso_info.ccso_enable[1]) {
+        const int blk_idc =
+            svt_read_symbol(r, ec_ctx->ccso_cdf[1], 2, ACCT_STR);
+        xd->ccso_blk_u[0] = blk_idc;
+        if (parse_ctxt->seq_header->sb_size == BLOCK_128X128) {
+            xd->ccso_blk_u[0] = xd->ccso_blk_u[1] = xd->ccso_blk_u[2] = xd->ccso_blk_u[3] = blk_idc;
+        }
+        // mi_params
+        //     ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
+        //                    (mi_col & ~blk_size_x)]
+        //     ->ccso_blk_u = blk_idc;
+    }
 
-  if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) && frame_header->ccso_info.ccso_enable[2]) {
-    const int blk_idc =
-        svt_read_symbol(r, ec_ctx->ccso_cdf[2], 2, ACCT_STR);
-    xd->ccso_blk_v[0] = blk_idc;
-    // mi_params
-    //     ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
-    //                    (mi_col & ~blk_size_x)]
-    //     ->ccso_blk_v = blk_idc;
-  }
+    if (!(mi_row & blk_size_y) && !(mi_col & blk_size_x) && frame_header->ccso_info.ccso_enable[2]) {
+        const int blk_idc =
+            svt_read_symbol(r, ec_ctx->ccso_cdf[2], 2, ACCT_STR);
+        xd->ccso_blk_v[0] = blk_idc;
+        if (parse_ctxt->seq_header->sb_size == BLOCK_128X128) {
+            xd->ccso_blk_v[0] = xd->ccso_blk_v[1] = xd->ccso_blk_v[2] = xd->ccso_blk_v[3] = blk_idc;
+        }
+        // mi_params
+        //     ->mi_grid_base[(mi_row & ~blk_size_y) * mi_params->mi_stride +
+        //                    (mi_col & ~blk_size_x)]
+        //     ->ccso_blk_v = blk_idc;
+    }
 }
 
 static void read_delta_qindex(ParseCtxt *parse_ctxt, BlockModeInfo *const mbmi, int32_t *cur_qind,

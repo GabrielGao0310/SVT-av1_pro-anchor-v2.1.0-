@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +35,7 @@ void dec_ccso_apply_luma_mb_filter(EbDecHandle * dec_handle, const int plane, co
                               uint16_t *dst_yuv, const int dst_stride, const uint8_t thr, const uint8_t filter_sup,
                               const uint8_t max_band_log2, const int edge_clf) {
    //   const CommonModeInfoParams *const mi_params = &cm->mi_params;
+//    SeqHeader *seq_hdr = &dec_handle->seq_header;
     FrameHeader  *frm_hdr = &dec_handle->frame_header;
     EbPictureBufferDesc *frame = dec_handle->cur_pic_buf[0]->ps_pic_buf;
     MainFrameBuf        *main_frame_buf = &dec_handle->main_frame_buf;
@@ -48,7 +47,7 @@ void dec_ccso_apply_luma_mb_filter(EbDecHandle * dec_handle, const int plane, co
     const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
     const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
     const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
-    const uint8_t shift_bits      = frame->bit_depth;
+    const uint8_t shift_bits      = frame->bit_depth - max_band_log2;
     const int     max_val         = (1 << frame->bit_depth) - 1;
    int           src_cls[2];
    const int     neg_thr = thr * -1;
@@ -60,10 +59,10 @@ void dec_ccso_apply_luma_mb_filter(EbDecHandle * dec_handle, const int plane, co
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
         //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
-            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
+            const int ccso_blk_idx = plane == 0 ? (y / 64) * ((pic_width + 63) / 64) + (x / 64) : (y / 32) * ((pic_width + 31) / 32) + (x / 32); //256x256
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
-           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
+            const bool use_ccso = *(sb_info->sb_ccso_blk_y);
            if (!use_ccso)
                continue;
            if (frm_hdr->ccso_info.ccso_bo_only[plane]) {
@@ -147,10 +146,10 @@ void dec_ccso_apply_luma_sb_filter(EbDecHandle * dec_handle, const int plane, co
        for (int x = 0; x < pic_width; x += blk_size) {
         //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
-            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
+            const int ccso_blk_idx = plane == 0 ? (y / 64) * ((pic_width + 63) / 64) + (x / 64) : (y / 32) * ((pic_width + 31) / 32) + (x / 32); //256x256
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
-           const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
+           const bool use_ccso = *(sb_info->sb_ccso_blk_y);
 
            if (!use_ccso)
                continue;
@@ -220,7 +219,7 @@ void dec_ccso_apply_chroma_mb_filter(EbDecHandle * dec_handle, const int plane, 
     const int     y_uv_vscale     = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
     const int     pic_height      = (plane == 0) ? frame->height : frame->height >> y_uv_vscale;
     const int     pic_width       = (plane == 0) ? frame->width : frame->width >> y_uv_hscale;
-    const uint8_t shift_bits      = frame->bit_depth;
+    const uint8_t shift_bits      = frame->bit_depth - max_band_log2;
     const int     max_val         = (1 << frame->bit_depth) - 1;
 
    int           src_cls[2];
@@ -234,7 +233,7 @@ void dec_ccso_apply_chroma_mb_filter(EbDecHandle * dec_handle, const int plane, 
        for (int x = 0; x < pic_width; x += blk_size) {
         //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
 
-            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
+            const int ccso_blk_idx = plane == 0 ? (y / 64) * ((pic_width + 63) / 64) + (x / 64) : (y / 32) * ((pic_width + 31) / 32) + (x / 32); //256x256
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
@@ -322,7 +321,7 @@ void dec_ccso_apply_chroma_sb_filter(EbDecHandle * dec_handle, const int plane, 
    for (int y = 0; y < pic_height; y += blk_size) {
        for (int x = 0; x < pic_width; x += blk_size) {
         //    const int ccso_blk_idx = (blk_size >> (MI_SIZE_LOG2 - y_uv_vscale)) * (y >> blk_log2) * frm_hdr->mi_stride + (blk_size >> (MI_SIZE_LOG2 - y_uv_hscale)) * (x >> blk_log2);
-            const int ccso_blk_idx = (y / 64) * ((pic_width + 63) / 64) + (x / 64);
+            const int ccso_blk_idx = plane == 0 ? (y / 64) * ((pic_width + 63) / 64) + (x / 64) : (y / 32) * ((pic_width + 31) / 32) + (x / 32); //256x256
             SBInfo *sb_info = NULL;
             sb_info = frame_buf->sb_info + ccso_blk_idx;
            const bool use_ccso = (plane == 1) ? *(sb_info->sb_ccso_blk_u) : *(sb_info->sb_ccso_blk_v);
@@ -398,9 +397,14 @@ void dec_ccso_frame(EbPictureBufferDesc *frame, EbDecHandle * dec_handle, uint16
         const int dst_stride = (plane == 0) ? frame->stride_y : ((plane == 1) ? frame->stride_cb : frame->stride_cr);
         uint16_t* dst_yuv16bit = (uint16_t *)malloc(dst_stride * pic_height * sizeof(uint16_t));
         uint8_t* frame_buf = (plane == 0) ? frame->buffer_y : ((plane == 1) ? frame->buffer_cb : frame->buffer_cr);
+        int32_t sub_x = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_x;
+        int32_t sub_y = (plane == 0) ? 0 : dec_handle->seq_header.color_config.subsampling_y;
+        int buf_offset = plane == 0 ? (frame->org_y * frame->stride_y + frame->org_x) : 
+                        (plane == 1 ? ((frame->org_y >> sub_y)  * frame->stride_cb + (frame->org_x >> sub_x)) : 
+                        ((frame->org_y >> sub_y)  * frame->stride_cr + (frame->org_x >> sub_x)));
         for (int r = 0; r < pic_height; ++r) {
             for (int c = 0; c < pic_width; ++c) {
-                dst_yuv16bit[r * dst_stride + c] = (uint16_t)frame_buf[r * dst_stride + c];
+                dst_yuv16bit[r * dst_stride + c] = (uint16_t)frame_buf[r * dst_stride + c + buf_offset];
             }
         }
 
@@ -423,7 +427,7 @@ void dec_ccso_frame(EbPictureBufferDesc *frame, EbDecHandle * dec_handle, uint16
 
         for (int r = 0; r < pic_height; ++r) {
             for (int c = 0; c < pic_width; ++c) {
-               frame_buf[r * dst_stride + c] = (uint8_t)dst_yuv16bit[r * dst_stride + c];
+               frame_buf[r * dst_stride + c + buf_offset] = (uint8_t)dst_yuv16bit[r * dst_stride + c];
             }
         }
         free(dst_yuv16bit);
