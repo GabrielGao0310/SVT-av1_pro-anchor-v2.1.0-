@@ -35,3 +35,6 @@ cd Build/linux
 
 {av1dec_ccso} -i {bin} -threads 1 -parallel-frames 1 -w {width} -h {height} -bit-depth 8 -colour-space 420 -fps-frm 1 -fps-summary 1 -o {dec_yuv} 2>{term_log}
 ```
+
+### 补充
+代码库基于SVT-AV1_v2.1.0开发而来。
