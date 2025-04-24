@@ -396,8 +396,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         frm_hdr                  = &pcs->ppcs->frm_hdr;
         CdefControls *cdef_ctrls = &pcs->ppcs->cdef_ctrls;
         
-        // // 记录开始时间
-        // clock_t start_cdef = clock();
+
         if (!cdef_ctrls->use_reference_cdef_fs) {
             if (scs->seq_header.cdef_level && pcs->ppcs->cdef_level) {
                 cdef_seg_search(pcs, scs, dlf_results->segment_index);
@@ -405,13 +404,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
         }
         //all seg based search is done. update total processed segments. if all done, finish the search and perfrom application.
         svt_block_on_mutex(pcs->cdef_search_mutex);
-        // 获取线程 ID 和名称
-        // pthread_t tid = pthread_self();
-        // char thread_name[16];
-        // prctl(PR_GET_NAME, thread_name, 0, 0, 0);
-        // printf("\nThread ID: %lu, Thread Name: %s entered the critical section.\n", (unsigned long)tid, thread_name);
-        // cdef_and_ccso(pcs); // 尝试外部函数解决多线程问题，未果
-        // printf("\nccso\n");
+
 #if CCSO
         uint8_t* ref_yuv[3] = {NULL, NULL, NULL};
         EbPictureBufferDesc *ref      = is_16bit ? pcs->input_frame16bit : pcs->ppcs->enhanced_pic; //原图像
@@ -522,12 +515,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 pcs->ppcs->nb_cdef_strengths             = 1;
                 frm_hdr->cdef_params.cdef_uv_strength[0] = 0;
             }
-            // // 记录结束时间
-            // clock_t end_cdef = clock();
-            // // 计算运行时间（以秒为单位）
-            // double cpu_time_used_cdef = ((double) (end_cdef - start_cdef)) / CLOCKS_PER_SEC;
-            // // 输出运行时间
-            // printf("cdef运行时间: %f 秒\n", cpu_time_used_cdef);
+
 
 #if CCSO
             svt_aom_get_recon_pic(pcs, &recon_pic, is_16bit);
@@ -608,7 +596,7 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 FALSE);
             lambda   = full_lambda;
 
-            // // 算一下rec和org的sse，好像不大对劲
+            // // 算一下rec和org的sse
             // double mse3[3] = {0, 0, 0}; //rec和org
             // double mse4[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
             // for (int p = 0; p < 3; p++){
@@ -625,19 +613,12 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
             //     mse4[p] = mse4[p] / (pd[p].dst.height * pd[p].dst.width);
             // }
 
-            // // 记录开始时间
-            // clock_t start_ccso = clock();
             // ccso过程
             ccso_search(pcs, pd, (int)lambda, ext_rec_y, rec_uv, org_uv);
             ccso_frame(recon_pic, pcs, pd, ext_rec_y);
-            // // 记录结束时间
-            // clock_t end_ccso = clock();
-            // // 计算运行时间（以秒为单位）
-            // double cpu_time_used_ccso = ((double) (end_ccso - start_ccso)) / CLOCKS_PER_SEC;
-            // // 输出运行时间
-            // printf("ccso运行时间: %f 秒\n", cpu_time_used_ccso);
 
-            // // 算一下rec和org的sse，好像不大对劲
+
+            // // 算一下rec和org的sse
             // double mse5[3] = {0, 0, 0}; //rec和org
             // double mse6[3] = {0, 0, 0}; //pd[pli].dst.buf和ref_yuv
             // for (int p = 0; p < 3; p++){
@@ -664,12 +645,12 @@ void *svt_aom_cdef_kernel(void *input_ptr) {
                 if (rec_uv[pli] != NULL) {
                     svt_aom_free(rec_uv[pli]);
                     // printf("\nfree rec_uv[%d]\n", pli);
-                    rec_uv[pli] = NULL;  // 防止重复释放
+                    rec_uv[pli] = NULL;  
                 }
                 if (org_uv[pli] != NULL) {
                     svt_aom_free(org_uv[pli]);
                     // printf("\nfree org_uv[%d]\n", pli);
-                    org_uv[pli] = NULL;  // 防止重复释放
+                    org_uv[pli] = NULL;  
                 }
             }      
 #endif
